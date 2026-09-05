@@ -95,6 +95,20 @@ input[type=text],input[type=number],select,textarea{
 }
 textarea{resize:vertical;min-height:60px;}
 input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+
+input[type=checkbox]{
+  -webkit-appearance:none;-moz-appearance:none;appearance:none;
+  width:15px;height:15px;min-width:15px;flex-shrink:0;
+  border:1.5px solid var(--border);border-radius:4px;background:var(--surface2);
+  margin:0;padding:0;display:inline-block;position:relative;cursor:pointer;vertical-align:middle;
+}
+input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent);}
+input[type=checkbox]:checked::after{
+  content:'';position:absolute;left:4px;top:1px;width:4px;height:8px;
+  border:solid var(--bg);border-width:0 2px 2px 0;transform:rotate(45deg);
+}
+input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
+
 .row{display:flex;gap:8px;}
 .row > *{flex:1;min-width:0;}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
@@ -160,7 +174,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent);}
 .ability-row:last-child{border-bottom:none;}
 .ability-name{flex:1;font-size:14px;min-width:0;}
 .ability-controls{display:flex;align-items:center;gap:6px;}
-.ability-mod-input{width:56px;text-align:center;padding:6px 4px;font-size:16px;font-weight:700;}
+.ability-mod-wrap{width:46px;flex-shrink:0;}
+.ability-mod-input{text-align:center;padding:6px 2px;font-size:16px;font-weight:700;}
 .partial-toggle{
   display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--text-faint);cursor:pointer;
   padding:5px 8px;border-radius:100px;border:1px solid var(--border);white-space:nowrap;
@@ -534,7 +549,28 @@ function renderNav(){
   });
 }
 
+function getFocusSelector(el){
+  if(!el || el===document.body) return null;
+  if(el.id) return '#' + CSS.escape(el.id);
+  if(el.attributes){
+    for(const attr of el.attributes){
+      if(attr.name.indexOf('data-') === 0){
+        return `[${attr.name}="${CSS.escape(attr.value)}"]`;
+      }
+    }
+  }
+  return null;
+}
+
 function renderApp(){
+  const active = document.activeElement;
+  let focusSel = null, selStart = null, selEnd = null;
+  const isTextInput = active && (active.tagName==='INPUT' || active.tagName==='TEXTAREA');
+  if(isTextInput){
+    focusSel = getFocusSelector(active);
+    try{ selStart = active.selectionStart; selEnd = active.selectionEnd; }catch(e){}
+  }
+
   renderNav();
   const app = document.getElementById('app');
   let html = '';
@@ -549,6 +585,18 @@ function renderApp(){
   }
   app.innerHTML = html;
   wireCurrentTab();
+
+  if(focusSel){
+    try{
+      const el = document.querySelector(focusSel);
+      if(el && (el.tagName==='INPUT' || el.tagName==='TEXTAREA')){
+        el.focus({preventScroll:true});
+        if(selStart!==null && typeof el.setSelectionRange === 'function'){
+          try{ el.setSelectionRange(selStart, selEnd); }catch(e){}
+        }
+      }
+    }catch(e){}
+  }
 }
 
 function wireCurrentTab(){
@@ -593,7 +641,7 @@ function renderCharacterTab(){
       </label>
       <div class="ability-controls">
         <button class="btn btn-icon btn-sm" data-ability-flaw="${d.id}" ${lock}>−</button>
-        <input type="number" class="ability-mod-input" data-ability-mod="${d.id}" value="${st.mod}" ${lock}>
+        <div class="ability-mod-wrap"><input type="number" class="ability-mod-input" data-ability-mod="${d.id}" value="${st.mod}" ${lock}></div>
         <button class="btn btn-icon btn-sm" data-ability-boost="${d.id}" ${lock}>+</button>
       </div>
     </div>`;
