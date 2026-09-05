@@ -195,7 +195,17 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 .item-traits{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;}
 .item-traits .tg{background:var(--surface3);border:1px solid var(--border);border-radius:100px;padding:2px 9px;font-size:10.5px;color:var(--text-dim);}
 
+.tag-chip.resist{border-color:#3a5a3f;background:#1c2b1f;color:#8fd39c;}
+.tag-chip.weak{border-color:#5a3a37;background:#2b1e1c;color:#e0958a;}
+.tag-chip.immune{border-color:#33506b;background:#18242e;color:#8fc0e0;}
+
 .hp-row{display:flex;align-items:stretch;gap:10px;}
+.extra-speed-row{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  font-size:12px;color:var(--text-dim);padding:4px 0;border-bottom:1px solid var(--border);
+}
+.extra-speed-row:last-child{border-bottom:none;}
+.extra-speed-row button{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:12px;padding:2px 4px;}
 .hp-main{flex:1;text-align:center;}
 .hp-num{font-size:34px;font-weight:700;}
 .hp-max{color:var(--text-dim);font-size:16px;}
@@ -267,6 +277,10 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 .eq-item .qty{width:44px;}
 .eq-item .qty input{text-align:center;padding:5px 3px;font-size:13px;}
 .eq-item select.locsel{width:118px;font-size:11.5px;padding:5px 4px;}
+.eq-item-controls{display:flex;align-items:center;gap:8px;margin-top:8px;}
+.eq-item-controls .qty{width:44px;}
+.eq-item-controls .qty input{text-align:center;padding:5px 3px;font-size:13px;}
+.eq-item-controls select.locsel{flex:1;font-size:11.5px;padding:5px 4px;}
 .weight-summary{display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:13px;}
 .weight-bar{height:7px;border-radius:4px;background:var(--surface3);overflow:hidden;margin-top:6px;}
 .weight-bar-fill{height:100%;background:var(--accent);}
@@ -414,6 +428,7 @@ function defaultCharacter(){
     name:'',
     className:'', level:1, mythicPoints:0,
     traits: [], // дескрипторы персонажа: "Человек", "Нечестивый" и т.п.
+    languages: [], // "Общий", "Эльфийский" и т.п.
     aboutCollapsed:true,
     actionsAllCollapsed:false,
     descriptors:{ ancestry:'', heritage:'', background:'', alignment:'', deity:'', size:'Средний' },
@@ -426,7 +441,12 @@ function defaultCharacter(){
       str:{mod:0, partial:false}, dex:{mod:0, partial:false}, con:{mod:0, partial:false},
       int:{mod:0, partial:false}, wis:{mod:0, partial:false}, cha:{mod:0, partial:false},
     },
-    hp:{max:10, current:10, temp:0},
+    perception:{
+      proficiency:'trained', otherBonus:0,
+      senses:{ precise:['Зрение'], imprecise:['Слух'], vague:['Нюх'] },
+    },
+    speeds:{ base:25, extra:[] }, // extra: [{id,name,value}]
+    hp:{max:10, current:10, temp:0, resistances:[]}, // resistances: [{id,name,type:'resistance'|'weakness'|'immunity',value}]
     defenses:{
       ac:{proficiency:'trained', armorBonus:0, dexCap:null, otherBonus:0},
       fort:{proficiency:'trained', otherBonus:0, critUpgrade:false},
@@ -494,10 +514,17 @@ function loadCharacter(){
       descriptors: Object.assign(defaultCharacter().descriptors, parsed.descriptors||{}),
       hp: Object.assign(defaultCharacter().hp, parsed.hp||{}),
       defenses: Object.assign(defaultCharacter().defenses, parsed.defenses||{}),
+      perception: Object.assign({}, defaultCharacter().perception, parsed.perception||{}, {
+        senses: Object.assign({}, defaultCharacter().perception.senses, (parsed.perception && parsed.perception.senses) || {})
+      }),
+      speeds: Object.assign({}, defaultCharacter().speeds, parsed.speeds||{}, {
+        extra: Array.isArray(parsed.speeds && parsed.speeds.extra) ? parsed.speeds.extra : []
+      }),
       equipment: Object.assign(defaultCharacter().equipment, parsed.equipment||{}),
       spellcasting: Object.assign(defaultCharacter().spellcasting, parsed.spellcasting||{}),
       books: Object.assign(defaultCharacter().books, parsed.books||{}),
       traits: Array.isArray(parsed.traits) ? parsed.traits : [],
+      languages: Array.isArray(parsed.languages) ? parsed.languages : [],
       actions: migrateActions(parsed.actions) || defaultCharacter().actions,
     });
   }catch(e){ console.warn('load failed', e); return defaultCharacter(); }
@@ -683,6 +710,22 @@ function renderCharacterTab(){
   const refTotal = saveTotal('ref','dex');
   const willTotal = saveTotal('will','wis');
 
+  const perceptionTotal = a.wis.mod + profTotal(CH.perception.proficiency, level) + Number(CH.perception.otherBonus||0);
+
+  function senseGroupHtml(key, label){
+    const list = CH.perception.senses[key] || [];
+    const chips = list.length
+      ? list.map((s,i)=>`<span class="tag-chip">${escapeHtml(s)}${!isPlay() ? `<button type="button" data-sense-del="${key}|${i}">✕</button>`:''}</span>`).join('')
+      : '<span class="empty-hint" style="padding:2px 0;">Нет</span>';
+    return `
+      <div class="field" style="margin-bottom:10px;">
+        <label class="field-label">${label}</label>
+        <div class="tag-chip-box">${chips}</div>
+        ${!isPlay() ? `<div class="tag-input-row"><input type="text" id="senseInput_${key}" placeholder="Добавить..."><button class="btn btn-sm btn-accent" data-sense-add="${key}">+</button></div>` : ''}
+      </div>
+    `;
+  }
+
   const profOptions = (val)=> PROF_RANKS.map(r=>`<option value="${r}" ${r===val?'selected':''}>${PROF_LABEL[r]}</option>`).join('');
 
   const skillRows = CH.skills.map(s=>{
@@ -707,6 +750,10 @@ function renderCharacterTab(){
   const traitsHtml = CH.traits.length
     ? CH.traits.map((t,i)=>`<span class="tag-chip">${escapeHtml(t)}${!isPlay() ? `<button type="button" data-trait-del="${i}">✕</button>`:''}</span>`).join('')
     : '<div class="empty-hint" style="padding:6px 0;">Дескрипторов пока нет</div>';
+
+  const languagesHtml = CH.languages.length
+    ? CH.languages.map((t,i)=>`<span class="tag-chip">${escapeHtml(t)}${!isPlay() ? `<button type="button" data-lang-del="${i}">✕</button>`:''}</span>`).join('')
+    : '<span class="empty-hint" style="padding:2px 0;">Языков пока нет</span>';
 
   return `
     ${renderTopbar('Персонаж', `${CH.className||'Класс не указан'} · Ур. ${CH.level}`)}
@@ -752,6 +799,15 @@ function renderCharacterTab(){
             <div class="field"><label class="field-label">Божество</label><input type="text" id="descDeity" value="${escapeAttr(CH.descriptors.deity)}" ${lock}></div>
             <div class="field"><label class="field-label">Размер</label><input type="text" id="descSize" value="${escapeAttr(CH.descriptors.size)}" ${lock}></div>
           </div>
+          <div class="field">
+            <label class="field-label">Языки</label>
+            <div class="tag-chip-box">${languagesHtml}</div>
+            ${!isPlay() ? `
+            <div class="tag-input-row">
+              <input type="text" id="languageInput" placeholder="Например: Общий, Эльфийский…">
+              <button class="btn btn-sm btn-accent" id="languageAddBtn">+</button>
+            </div>` : ''}
+          </div>
           <div class="field"><label class="field-label">Внешность</label><textarea id="charAppearance" ${lock}>${escapeHtml_(CH.appearance)}</textarea></div>
           <div class="field" style="margin-bottom:0;"><label class="field-label">Заметки</label><textarea id="charNotes" ${lock}>${escapeHtml_(CH.notes)}</textarea></div>
         </div>
@@ -788,6 +844,11 @@ function renderCharacterTab(){
         <div class="temp-hp-field">
           <label>Временные ОЗ</label>
           <input type="number" id="hpTempInput" value="${CH.hp.temp}" style="width:90px;">
+        </div>
+        <div class="field" style="margin-top:14px;margin-bottom:0;">
+          <label class="field-label">Сопротивления, уязвимости, иммунитеты</label>
+          <div class="tag-chip-box">${(CH.hp.resistances||[]).length ? CH.hp.resistances.map(resistChipHtml).join('') : '<span class="empty-hint" style="padding:2px 0;">Нет</span>'}</div>
+          ${!isPlay() ? `<button class="btn btn-sm btn-accent" id="addResistBtn">+ Добавить</button>` : ''}
         </div>
       </div>
 
@@ -831,6 +892,34 @@ function renderCharacterTab(){
       </div>
 
       <div class="card">
+        <h3 style="margin-bottom:10px;">Восприятие</h3>
+        <div class="def-box" style="margin-bottom:14px;">
+          <div class="def-title">Внимательность</div>
+          <div class="def-val">${fmtMod(perceptionTotal)}</div>
+          <select data-perception-prof ${lock}>${profOptions(CH.perception.proficiency)}</select>
+          <div class="mini-row"><input type="number" data-perception-other value="${CH.perception.otherBonus||0}" placeholder="Прочее" ${lock}></div>
+        </div>
+        ${senseGroupHtml('precise','Точные')}
+        ${senseGroupHtml('imprecise','Вспомогательные')}
+        ${senseGroupHtml('vague','Дополнительные')}
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:10px;">Движение</h3>
+        <div class="field">
+          <label class="field-label">Наземная скорость (футы)</label>
+          <input type="number" id="speedBase" value="${CH.speeds.base}" ${lock}>
+        </div>
+        ${CH.speeds.extra.length ? `<div style="margin-top:4px;">${CH.speeds.extra.map(s=>`
+          <div class="extra-speed-row">
+            <span>${escapeHtml(s.name)}${s.value ? ' — '+escapeHtml(s.value) : ''}</span>
+            ${!isPlay() ? `<button data-speed-del="${s.id}">✕</button>` : ''}
+          </div>
+        `).join('')}</div>` : ''}
+        ${!isPlay() ? `<button class="btn btn-sm" id="addSpeedBtn" style="margin-top:10px;">+ Доп. скорость</button>` : ''}
+      </div>
+
+      <div class="card">
         <h3 style="margin-bottom:6px;">Навыки</h3>
         <div>${skillRows}</div>
         <div class="row" style="margin-top:12px;">
@@ -843,6 +932,13 @@ function renderCharacterTab(){
   `;
 }
 function abilityShort(id){ return {str:'Сил',dex:'Лов',con:'Тел',int:'Инт',wis:'Мдр',cha:'Хар'}[id]; }
+function resistChipHtml(r){
+  const cls = r.type==='resistance' ? 'resist' : r.type==='weakness' ? 'weak' : 'immune';
+  const label = r.type==='resistance' ? `Сопротивление к ${r.name} ${r.value}`
+              : r.type==='weakness' ? `Уязвимость к ${r.name} ${r.value}`
+              : `Иммунитет к ${r.name}`;
+  return `<span class="tag-chip ${cls}">${escapeHtml(label)}${!isPlay() ? `<button type="button" data-resist-del="${r.id}">✕</button>`:''}</span>`;
+}
 function escapeAttr(s){ return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function escapeHtml(s){ return escapeAttr(s).replace(/\n/g,'<br>'); }
 
@@ -887,6 +983,23 @@ function wireCharacterTab(){
     });
   });
 
+  const languageAddBtn = byId('languageAddBtn');
+  if(languageAddBtn) languageAddBtn.addEventListener('click', ()=>{
+    const inp = byId('languageInput');
+    const v = inp.value.trim();
+    if(v){ CH.languages.push(v); save(); renderApp(); }
+  });
+  const languageInputEl = byId('languageInput');
+  if(languageInputEl) languageInputEl.addEventListener('keydown', e=>{
+    if(e.key==='Enter'){ e.preventDefault(); languageAddBtn.click(); }
+  });
+  root.querySelectorAll('[data-lang-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      CH.languages.splice(Number(btn.dataset.langDel),1);
+      save(); renderApp();
+    });
+  });
+
   root.querySelectorAll('[data-ability-mod]').forEach(inp=>{
     inp.addEventListener('input', ()=>{
       CH.abilities[inp.dataset.abilityMod].mod = Number(inp.value)||0;
@@ -919,6 +1032,46 @@ function wireCharacterTab(){
   byId('hpMaxInput').addEventListener('input', e=>{ CH.hp.max = Math.max(0,Number(e.target.value)||0); save(); renderApp(); });
   byId('hpTempInput').addEventListener('input', e=>{ CH.hp.temp = Math.max(0,Number(e.target.value)||0); save(); renderApp(); });
 
+  root.querySelectorAll('[data-resist-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      CH.hp.resistances = CH.hp.resistances.filter(x=>x.id!==btn.dataset.resistDel);
+      save(); renderApp();
+    });
+  });
+  const addResistBtn = byId('addResistBtn');
+  if(addResistBtn) addResistBtn.addEventListener('click', ()=>{
+    openModal('Сопротивление / уязвимость / иммунитет', `
+      <div class="field"><label class="field-label">Тип урона или эффекта</label><input type="text" id="mfName" placeholder="Огонь, Холод, Электричество…"></div>
+      <div class="field"><label class="field-label">Тип</label>
+        <select id="mfRType">
+          <option value="resistance">Сопротивление</option>
+          <option value="weakness">Уязвимость</option>
+          <option value="immunity">Иммунитет</option>
+        </select>
+      </div>
+      <div class="field" id="mfValueField">
+        <label class="field-label">Значение</label><input type="number" min="0" id="mfValue" value="5">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-block" id="mfCancel">Отмена</button>
+        <button class="btn btn-accent btn-block" id="mfSave">Добавить</button>
+      </div>
+    `, ()=>{
+      byId('mfRType').addEventListener('change', e=>{
+        byId('mfValueField').style.display = e.target.value==='immunity' ? 'none' : '';
+      });
+      byId('mfCancel').addEventListener('click', closeModal);
+      byId('mfSave').addEventListener('click', ()=>{
+        const name = byId('mfName').value.trim();
+        if(!name) return;
+        const type = byId('mfRType').value;
+        const value = type==='immunity' ? null : (Number(byId('mfValue').value)||0);
+        CH.hp.resistances.push({id:uid(), name, type, value});
+        save(); closeModal(); renderApp();
+      });
+    });
+  });
+
   root.querySelector('[data-ac-prof]').addEventListener('change', e=>{ CH.defenses.ac.proficiency=e.target.value; save(); renderApp(); });
   root.querySelector('[data-ac-armor]').addEventListener('input', e=>{ CH.defenses.ac.armorBonus=Number(e.target.value)||0; save(); renderApp(); });
   root.querySelector('[data-ac-dexcap]').addEventListener('input', e=>{
@@ -932,6 +1085,58 @@ function wireCharacterTab(){
     root.querySelector(`[data-save-prof="${key}"]`).addEventListener('change', e=>{ CH.defenses[key].proficiency=e.target.value; save(); renderApp(); });
     root.querySelector(`[data-save-other="${key}"]`).addEventListener('input', e=>{ CH.defenses[key].otherBonus=Number(e.target.value)||0; save(); renderApp(); });
     root.querySelector(`[data-save-crit="${key}"]`).addEventListener('change', e=>{ CH.defenses[key].critUpgrade=e.target.checked; save(); });
+  });
+
+  root.querySelector('[data-perception-prof]').addEventListener('change', e=>{ CH.perception.proficiency=e.target.value; save(); renderApp(); });
+  root.querySelector('[data-perception-other]').addEventListener('input', e=>{ CH.perception.otherBonus=Number(e.target.value)||0; save(); renderApp(); });
+
+  root.querySelectorAll('[data-sense-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const [key, idx] = btn.dataset.senseDel.split('|');
+      CH.perception.senses[key].splice(Number(idx),1);
+      save(); renderApp();
+    });
+  });
+  root.querySelectorAll('[data-sense-add]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const key = btn.dataset.senseAdd;
+      const inp = byId('senseInput_'+key);
+      const v = inp.value.trim();
+      if(v){ CH.perception.senses[key].push(v); save(); renderApp(); }
+    });
+  });
+  ['precise','imprecise','vague'].forEach(key=>{
+    const inp = byId('senseInput_'+key);
+    if(inp) inp.addEventListener('keydown', e=>{
+      if(e.key==='Enter'){ e.preventDefault(); root.querySelector(`[data-sense-add="${key}"]`).click(); }
+    });
+  });
+
+  const speedBaseInput = byId('speedBase');
+  if(speedBaseInput) speedBaseInput.addEventListener('input', e=>{ CH.speeds.base=Number(e.target.value)||0; save(); renderApp(); });
+  root.querySelectorAll('[data-speed-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      CH.speeds.extra = CH.speeds.extra.filter(x=>x.id!==btn.dataset.speedDel);
+      save(); renderApp();
+    });
+  });
+  const addSpeedBtn = byId('addSpeedBtn');
+  if(addSpeedBtn) addSpeedBtn.addEventListener('click', ()=>{
+    openModal('Дополнительная скорость', `
+      <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" placeholder="Полёт, Лазание, Плавание…"></div>
+      <div class="field"><label class="field-label">Значение</label><input type="text" id="mfValue" placeholder="30 фт"></div>
+      <div class="modal-actions">
+        <button class="btn btn-block" id="mfCancel">Отмена</button>
+        <button class="btn btn-accent btn-block" id="mfSave">Добавить</button>
+      </div>
+    `, ()=>{
+      byId('mfCancel').addEventListener('click', closeModal);
+      byId('mfSave').addEventListener('click', ()=>{
+        const name = byId('mfName').value.trim();
+        const value = byId('mfValue').value.trim();
+        if(name){ CH.speeds.extra.push({id:uid(), name, value}); save(); closeModal(); renderApp(); }
+      });
+    });
   });
 
   root.querySelectorAll('[data-skill-prof]').forEach(sel=>{
@@ -1264,17 +1469,31 @@ function renderEquipmentTab(){
   const bulkPct = clamp((carriedTotalBulk/maxBulk)*100, 0, 100);
 
   function itemRow(i){
+    if(i.isCurrency){
+      return `
+      <div class="eq-item" data-item-id="${i.id}">
+        <div class="nm"><div class="n">${escapeHtml(i.name)}</div></div>
+        <div class="qty"><input type="number" min="0" data-qty="${i.id}" value="${i.qty}"></div>
+        <select class="locsel" data-loc="${i.id}">${locationOptions(i.location)}</select>
+        <span style="width:18px;display:inline-block"></span>
+      </div>`;
+    }
     return `
-    <div class="eq-item" data-item-id="${i.id}">
-      <div class="nm">
-        <div class="n">${escapeHtml(i.name)}</div>
-        <div class="meta">${i.isCurrency ? '' : ('объём '+ (i.bulk||0) + (i.note? ' · '+escapeHtml(i.note):'')) }</div>
-        ${tagsMetaHtml(i.traits)}
+    <div class="list-item" data-item-id="${i.id}">
+      <div class="list-item-head" data-item-toggle>
+        <div class="nm">
+          <div class="n">${escapeHtml(i.name)}</div>
+          <div class="meta">объём ${i.bulk||0}${i.note ? ' · '+escapeHtml(i.note) : ''}</div>
+          ${tagsMetaHtml(i.traits)}
+        </div>
       </div>
-      <div class="qty"><input type="number" min="0" data-qty="${i.id}" value="${i.qty}"></div>
-      <select class="locsel" data-loc="${i.id}">${locationOptions(i.location)}</select>
-      ${!i.isCurrency ? `<button class="skill-del" data-item-edit="${i.id}" title="Изменить">✎</button>` : ''}
-      ${i.custom !== false ? `<button class="skill-del" data-item-del="${i.id}">✕</button>` : '<span style="width:18px;display:inline-block"></span>'}
+      <div class="eq-item-controls">
+        <div class="qty"><input type="number" min="0" data-qty="${i.id}" value="${i.qty}"></div>
+        <select class="locsel" data-loc="${i.id}">${locationOptions(i.location)}</select>
+        <button class="skill-del" data-item-edit="${i.id}" title="Изменить">✎</button>
+        ${i.custom !== false ? `<button class="skill-del" data-item-del="${i.id}">✕</button>` : '<span style="width:18px;display:inline-block"></span>'}
+      </div>
+      <div class="list-item-body">${i.desc ? escapeHtml(i.desc) : 'Нет описания'}</div>
     </div>`;
   }
 
@@ -1325,7 +1544,7 @@ function renderEquipmentTab(){
 }
 
 function itemFormHtml(i){
-  i = i || {name:'', qty:1, bulk:0, note:'', location:'carried'};
+  i = i || {name:'', qty:1, bulk:0, note:'', location:'carried', desc:''};
   return `
     <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" value="${escapeAttr(i.name)}"></div>
     <div class="row2">
@@ -1334,12 +1553,14 @@ function itemFormHtml(i){
     </div>
     <div class="field"><label class="field-label">Где находится</label><select id="mfLoc">${locationOptions(i.location)}</select></div>
     <div class="field"><label class="field-label">Заметка</label><input type="text" id="mfNote" value="${escapeAttr(i.note)}"></div>
+    <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(i.desc)}</textarea></div>
     <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
   `;
 }
 
 function wireEquipmentTab(){
   const root = document.querySelector('.page.active');
+  wireListItemToggles(root);
 
   root.querySelectorAll('[data-qty]').forEach(inp=>{
     inp.addEventListener('input', ()=>{
@@ -1377,6 +1598,7 @@ function wireEquipmentTab(){
           it.bulk = Number(byId('mfBulk').value)||0;
           it.location = byId('mfLoc').value;
           it.note = byId('mfNote').value;
+          it.desc = byId('mfDesc').value;
           it.traits = tagEditor.getTags();
           save(); closeModal(); renderApp();
         });
@@ -1406,7 +1628,7 @@ function wireEquipmentTab(){
         CH.equipment.items.push({
           id:uid(), name:byId('mfName').value||'Без названия', qty:Number(byId('mfQty').value)||0,
           bulk:Number(byId('mfBulk').value)||0, location:byId('mfLoc').value, note:byId('mfNote').value,
-          isCurrency:false, custom:true, traits: tagEditor.getTags()
+          desc: byId('mfDesc').value, isCurrency:false, custom:true, traits: tagEditor.getTags()
         });
         save(); closeModal(); renderApp();
       });
