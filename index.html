@@ -425,7 +425,7 @@ function defaultCharacter(){
       will:{proficiency:'trained', otherBonus:0, critUpgrade:false},
     },
     skills: BASE_SKILLS.map(s=>({id:uid(), name:s.name, ability:s.ability, proficiency:'untrained', otherBonus:0, multi:false})),
-    actions: BASIC_ACTIONS.map(a=>({id:uid(), name:a.name, type:a.type, traits:a.traits, desc:a.desc, fromFeat:false})),
+    actions: BASIC_ACTIONS.map(a=>({id:uid(), name:a.name, type:a.type, traits: splitTraitsString(a.traits), desc:a.desc, fromFeat:false})),
     equipment:{
       items: [], // {id,name,qty,bulk,location,note,isCurrency,traits}
       storages: [], // {id,name}
@@ -465,6 +465,16 @@ function migrateAbilities(raw){
   return result;
 }
 
+function splitTraitsString(s){
+  if(Array.isArray(s)) return s.slice();
+  if(!s) return [];
+  return String(s).split(',').map(t=>t.trim()).filter(Boolean);
+}
+function migrateActions(actions){
+  if(!Array.isArray(actions)) return null;
+  return actions.map(a=>Object.assign({}, a, {traits: splitTraitsString(a.traits)}));
+}
+
 function loadCharacter(){
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -479,6 +489,7 @@ function loadCharacter(){
       spellcasting: Object.assign(defaultCharacter().spellcasting, parsed.spellcasting||{}),
       books: Object.assign(defaultCharacter().books, parsed.books||{}),
       traits: Array.isArray(parsed.traits) ? parsed.traits : [],
+      actions: migrateActions(parsed.actions) || defaultCharacter().actions,
     });
   }catch(e){ console.warn('load failed', e); return defaultCharacter(); }
 }
@@ -1071,7 +1082,8 @@ function renderActionsTab(){
       <div class="list-item-head" data-item-toggle>
         <div>
           <div class="name">${escapeHtml(a.name)}</div>
-          <div class="tag">${escapeHtml(a.type)}${a.traits ? ' · '+escapeHtml(a.traits):''}${a.fromFeat?' · из черты':''}</div>
+          <div class="tag">${escapeHtml(a.type)}${a.fromFeat?' · из черты':''}</div>
+          ${tagsMetaHtml(a.traits)}
         </div>
       </div>
       <div class="list-item-body">
@@ -1095,7 +1107,7 @@ function renderActionsTab(){
 }
 
 function actionFormHtml(a){
-  a = a || {name:'', type:'Одно действие', traits:'', desc:''};
+  a = a || {name:'', type:'Одно действие', traits:[], desc:''};
   return `
     <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" value="${escapeAttr(a.name)}"></div>
     <div class="field"><label class="field-label">Стоимость действия</label>
@@ -1103,7 +1115,7 @@ function actionFormHtml(a){
         ${['Свободное действие','Реакция','Одно действие','Два действия','Три действия','От 1 до 3 действий','Несколько раундов'].map(t=>`<option ${t===a.type?'selected':''}>${t}</option>`).join('')}
       </select>
     </div>
-    <div class="field"><label class="field-label">Черты (через запятую)</label><input type="text" id="mfTraits" value="${escapeAttr(a.traits)}"></div>
+    <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
     <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(a.desc)}</textarea></div>
   `;
 }
@@ -1121,9 +1133,11 @@ function wireActionsTab(){
         <button class="btn btn-accent btn-block" id="mfSave">Добавить</button>
       </div>
     `, (m)=>{
+      const tagEditor = createTagEditor([]);
+      byId('mfTagsContainer').appendChild(tagEditor.el);
       byId('mfCancel').addEventListener('click', closeModal);
       byId('mfSave').addEventListener('click', ()=>{
-        CH.actions.push({id:uid(), name:byId('mfName').value||'Без названия', type:byId('mfType').value, traits:byId('mfTraits').value, desc:byId('mfDesc').value, fromFeat:false});
+        CH.actions.push({id:uid(), name:byId('mfName').value||'Без названия', type:byId('mfType').value, traits:tagEditor.getTags(), desc:byId('mfDesc').value, fromFeat:false});
         save(); closeModal(); renderApp();
       });
     });
@@ -1139,10 +1153,12 @@ function wireActionsTab(){
           <button class="btn btn-accent btn-block" id="mfSave">Сохранить</button>
         </div>
       `, ()=>{
+        const tagEditor = createTagEditor(a.traits||[]);
+        byId('mfTagsContainer').appendChild(tagEditor.el);
         byId('mfCancel').addEventListener('click', closeModal);
         byId('mfSave').addEventListener('click', ()=>{
           a.name = byId('mfName').value||a.name; a.type = byId('mfType').value;
-          a.traits = byId('mfTraits').value; a.desc = byId('mfDesc').value;
+          a.traits = tagEditor.getTags(); a.desc = byId('mfDesc').value;
           save(); closeModal(); renderApp();
         });
       });
@@ -1738,7 +1754,7 @@ function wireFeatsTab(){
         const desc = byId('mfDesc').value;
         CH.feats.push({id:uid(), name, level:Number(byId('mfLevel').value)||0, category:byId('mfCategory').value, desc, traits: tagEditor.getTags()});
         if(byId('mfAddAction').checked){
-          CH.actions.push({id:uid(), name, type:'Одно действие', traits:'', desc, fromFeat:true});
+          CH.actions.push({id:uid(), name, type:'Одно действие', traits:[], desc, fromFeat:true});
         }
         save(); closeModal(); renderApp();
       });
@@ -1759,7 +1775,7 @@ function wireFeatsTab(){
           f.category=byId('mfCategory').value; f.desc=byId('mfDesc').value;
           f.traits = tagEditor.getTags();
           if(byId('mfAddAction').checked){
-            CH.actions.push({id:uid(), name:f.name, type:'Одно действие', traits:'', desc:f.desc, fromFeat:true});
+            CH.actions.push({id:uid(), name:f.name, type:'Одно действие', traits:[], desc:f.desc, fromFeat:true});
           }
           save(); closeModal(); renderApp();
         });
