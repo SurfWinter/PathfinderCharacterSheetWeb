@@ -304,6 +304,8 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 }
 .slot-box select{font-size:12px;padding:5px;margin-top:4px;}
 .slot-box .exp{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11px;color:var(--text-dim);}
+.prep-exp-label{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);white-space:nowrap;flex-shrink:0;cursor:pointer;}
+.list-item:has(.prep-exp-checkbox:checked){opacity:.5;}
 
 /* modal */
 .modal-overlay{
@@ -457,6 +459,8 @@ function defaultCharacter(){
     languages: [], // "Общий", "Эльфийский" и т.п.
     aboutCollapsed:true,
     actionsAllCollapsed:false,
+    spellSlotsCollapsed:false,
+    preparedListCollapsed:false,
     descriptors:{ ancestry:'', heritage:'', background:'', alignment:'', deity:'', size:'Средний' },
     appearance:'', notes:'',
     abilitiesCollapsed:true,
@@ -1815,7 +1819,6 @@ function renderSpellsTab(){
         <div class="slot-box">
           <div>Ячейка ${idx+1}</div>
           <select data-prep-slot="${lvl}|${idx}">${bookOptions(slot.spellId)}</select>
-          ${spell ? `<label class="exp"><input type="checkbox" data-prep-exp="${lvl}|${idx}" ${slot.expended?'checked':''}> использовано</label>` : ''}
         </div>`;
       }).join('');
       return `<div style="margin-bottom:14px;"><div class="field-label" style="margin-bottom:6px;">${lvl===0?'Заговоры':'Уровень '+lvl}</div><div class="slot-grid">${boxes}</div></div>`;
@@ -1825,6 +1828,29 @@ function renderSpellsTab(){
   const focus = sc.focus;
   const focusMax = Math.min(focus.spellIds.length, 3);
   const focusUsed = Math.min(focus.used||0, focusMax);
+
+  let preparedCardsHtml = '';
+  if(sc.type === 'prepared'){
+    preparedCardsHtml = SPELL_LEVELS.filter(l=>Number(sc.slotsMax[l])>0).map(lvl=>{
+      const slots = sc.prepared[lvl] || [];
+      const cards = slots.map((slot,idx)=>{
+        if(!slot.spellId) return '';
+        const sp = CH.books.spellbook.find(s=>s.id===slot.spellId);
+        if(!sp) return '';
+        return `
+        <div class="list-item">
+          <div class="list-item-head" data-item-toggle>
+            <div><div class="name">${escapeHtml(sp.name)}</div><div class="tag">Ячейка ${idx+1}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
+            <label class="prep-exp-label"><input type="checkbox" class="prep-exp-checkbox" data-prep-exp="${lvl}|${idx}" ${slot.expended?'checked':''}> исп.</label>
+          </div>
+          <div class="list-item-body">${escapeHtml(sp.desc)||'Без описания'}</div>
+        </div>`;
+      }).join('');
+      if(!cards.trim()) return '';
+      return `<div style="margin-bottom:12px;"><div class="field-label" style="margin-bottom:6px;">${lvl===0?'Заговоры':'Уровень '+lvl}</div>${cards}</div>`;
+    }).join('');
+    if(!preparedCardsHtml.trim()) preparedCardsHtml = '<div class="empty-hint">Нет подготовленных заклинаний — заполните ячейки выше</div>';
+  }
 
   const focusSpellItems = focus.spellIds.map(id=>{
     const sp = CH.books.spellbook.find(s=>s.id===id);
@@ -1873,7 +1899,23 @@ function renderSpellsTab(){
         <div class="stat-grid" style="grid-template-columns:repeat(6,1fr);">${slotsConfig}</div>
       </div>
 
-      ${sc.type!=='none' ? `<div class="card">${castingBody}</div>` : ''}
+      ${sc.type!=='none' ? `
+      <div class="card">
+        <div class="card-header" data-collapse-toggle="spellSlotsCollapsed">
+          <h3>${sc.type==='spontaneous' ? 'Использование ячеек' : 'Заполнение ячеек'}</h3>
+          <svg class="chev ${!CH.spellSlotsCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="card-body ${CH.spellSlotsCollapsed?'collapsed':''}">${castingBody}</div>
+      </div>` : ''}
+
+      ${sc.type==='prepared' ? `
+      <div class="card">
+        <div class="card-header" data-collapse-toggle="preparedListCollapsed">
+          <h3>Подготовленные заклинания</h3>
+          <svg class="chev ${!CH.preparedListCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div class="card-body ${CH.preparedListCollapsed?'collapsed':''}">${preparedCardsHtml}</div>
+      </div>` : ''}
 
       <div class="card">
         <h3 style="margin-bottom:4px;">Фокальные заклинания</h3>
@@ -1895,6 +1937,7 @@ function wireSpellsTab(){
   const root = document.querySelector('.page.active');
   const sc = CH.spellcasting;
   wireListItemToggles(root);
+  wireCollapsibles(root);
 
   byId('scType').addEventListener('change', e=>{ sc.type=e.target.value; save(); renderApp(); });
   byId('scAbility').value = sc.ability;
@@ -1924,8 +1967,10 @@ function wireSpellsTab(){
       save(); renderApp();
     });
   });
-  root.querySelectorAll('[data-prep-exp]').forEach(chk=>{
-    chk.addEventListener('change', ()=>{
+  root.querySelectorAll('.prep-exp-label').forEach(label=>{
+    label.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const chk = label.querySelector('[data-prep-exp]');
       const [lvl, idx] = chk.dataset.prepExp.split('|');
       sc.prepared[lvl][idx].expended = chk.checked;
       save();
