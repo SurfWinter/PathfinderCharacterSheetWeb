@@ -236,14 +236,22 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 .skill-name{flex:1;min-width:0;}
 .skill-name .n{font-size:14px;}
 .skill-name .a{font-size:11px;color:var(--text-dim);}
-.skill-prof{width:104px;}
-.skill-prof select{padding:6px 4px;font-size:12px;}
+.skill-prof{width:auto;flex-shrink:0;}
+.prof-dots{display:flex;gap:4px;align-items:center;padding:4px 2px;}
+.prof-dot{width:13px;height:13px;border-radius:50%;border:2px solid var(--border);background:transparent;flex-shrink:0;box-sizing:border-box;}
+.prof-dots:not(.locked) .prof-dot{cursor:pointer;}
+.prof-dots.locked{opacity:.6;}
+.prof-dot.filled{border-color:transparent;}
+.prof-dot.c-trained{background:#5fb8d6;}
+.prof-dot.c-expert{background:#4a7fd8;}
+.prof-dot.c-master{background:#9a6fd8;}
+.prof-dot.c-legendary{background:#e0913f;}
 .skill-bonus-input{width:52px;}
 .skill-bonus-input input{padding:6px 4px;text-align:center;font-size:12px;}
 .skill-total{width:38px;text-align:center;font-size:17px;font-weight:700;}
 .skill-del{background:none;border:none;color:var(--text-faint);font-size:16px;cursor:pointer;padding:2px 4px;}
-.reorder-col{display:flex;flex-direction:column;gap:1px;flex-shrink:0;}
-.reorder-col button{background:none;border:none;color:var(--text-faint);font-size:9px;line-height:1;padding:2px 3px;cursor:pointer;}
+.reorder-col{display:flex;flex-direction:column;gap:3px;flex-shrink:0;}
+.reorder-col button{background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-size:13px;line-height:1;min-width:26px;min-height:22px;padding:2px;cursor:pointer;}
 .reorder-col button:disabled{opacity:.2;cursor:not-allowed;}
 
 /* ---------- generic list items (actions / equipment / feats / spells) ---------- */
@@ -355,6 +363,17 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const PROF_RANKS = ['untrained','trained','expert','master','legendary'];
 const PROF_LABEL = {untrained:'Неизученный', trained:'Изученный', expert:'Экспертный', master:'Мастерский', legendary:'Легендарный'};
 const PROF_BONUS = {untrained:0, trained:2, expert:4, master:6, legendary:8};
+function profDotsHtml(skillId, rank){
+  const idx = PROF_RANKS.indexOf(rank);
+  const colorClass = rank !== 'untrained' ? `c-${rank}` : '';
+  const locked = isPlay();
+  let dots = '';
+  for(let i=1;i<=4;i++){
+    const filled = i <= idx;
+    dots += `<span class="prof-dot ${filled ? 'filled '+colorClass : ''}" ${locked ? '' : `data-dot-pos="${i}"`}></span>`;
+  }
+  return `<div class="prof-dots ${locked?'locked':''}" data-skill-dots="${skillId}" title="${PROF_LABEL[rank]}">${dots}</div>`;
+}
 function profTotal(rank, level){
   if(rank === 'untrained') return 0;
   return PROF_BONUS[rank] + Number(level||0);
@@ -757,16 +776,17 @@ function renderCharacterTab(){
     const total = a[s.ability].mod + profTotal(s.proficiency, level) + Number(s.otherBonus||0);
     return `
     <div class="skill-row" data-skill-id="${s.id}">
+      ${!isPlay() ? `
       <div class="reorder-col">
-        <button data-skill-up="${s.id}" ${lock || (idx===0?'disabled':'')}>▲</button>
-        <button data-skill-down="${s.id}" ${lock || (idx===CH.skills.length-1?'disabled':'')}>▼</button>
-      </div>
+        <button data-skill-up="${s.id}" ${idx===0?'disabled':''}>▲</button>
+        <button data-skill-down="${s.id}" ${idx===CH.skills.length-1?'disabled':''}>▼</button>
+      </div>` : ''}
       <div class="skill-name">
         <div class="n">${s.multi ? `<input type="text" class="skill-multi-name" data-skill-name="${s.id}" value="${escapeAttr(s.name)}" placeholder="Название" ${lock}>` : s.name}</div>
         <div class="a">${abilityShort(s.ability)}</div>
       </div>
       <div class="skill-prof">
-        <select data-skill-prof="${s.id}" ${lock}>${profOptions(s.proficiency)}</select>
+        ${profDotsHtml(s.id, s.proficiency)}
       </div>
       <div class="skill-bonus-input">
         <input type="number" data-skill-bonus="${s.id}" value="${s.otherBonus||0}" title="доп. бонус" ${lock}>
@@ -1168,10 +1188,16 @@ function wireCharacterTab(){
     });
   });
 
-  root.querySelectorAll('[data-skill-prof]').forEach(sel=>{
-    sel.addEventListener('change', ()=>{
-      const s = CH.skills.find(x=>x.id===sel.dataset.skillProf);
-      s.proficiency = sel.value; save(); renderApp();
+  root.querySelectorAll('[data-skill-dots]').forEach(container=>{
+    if(container.classList.contains('locked')) return;
+    container.querySelectorAll('[data-dot-pos]').forEach(dot=>{
+      dot.addEventListener('click', ()=>{
+        const s = CH.skills.find(x=>x.id===container.dataset.skillDots);
+        const curIdx = PROF_RANKS.indexOf(s.proficiency);
+        const pos = Number(dot.dataset.dotPos);
+        s.proficiency = PROF_RANKS[curIdx===pos ? pos-1 : pos];
+        save(); renderApp();
+      });
     });
   });
   root.querySelectorAll('[data-skill-bonus]').forEach(inp=>{
