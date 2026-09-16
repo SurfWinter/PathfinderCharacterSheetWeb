@@ -259,19 +259,21 @@ function enableTouchReorder({ root, itemSelector, handleSelector, canReorder = (
     drag = {
       handle,
       item,
+      pointerId: event.pointerId,
       group: groupForItem(item),
       startY: event.clientY,
       originalIds: itemIds(root, itemSelector, groupForItem(item), groupForItem),
       moved: false,
     };
-    handle.setPointerCapture(event.pointerId);
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', finish, { once: true });
-    handle.addEventListener('pointercancel', cancel, { once: true });
+    // Нельзя полагаться на setPointerCapture: при insertBefore браузер может
+    // отменить захват, так как перетаскиваемый узел меняет родителя.
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', cancel);
   });
 
   function move(event) {
-    if (!drag) return;
+    if (!drag || event.pointerId !== drag.pointerId) return;
     if (!drag.moved && Math.abs(event.clientY - drag.startY) < 5) return;
     drag.moved = true;
     drag.item.classList.add('is-dragging');
@@ -287,18 +289,36 @@ function enableTouchReorder({ root, itemSelector, handleSelector, canReorder = (
     if (event.clientY > window.innerHeight - 72) window.scrollBy(0, 10);
   }
 
-  function finish() {
-    if (!drag) return;
+  function finish(event) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
     const currentIds = itemIds(root, itemSelector, drag.group, groupForItem);
     drag.item.classList.remove('is-dragging');
     if (drag.moved && currentIds.join('|') !== drag.originalIds.join('|')) onReorder(drag.group, currentIds);
+    stopListening();
     drag = null;
   }
 
-  function cancel() {
-    if (!drag) return;
+  function cancel(event) {
+    if (!drag || event.pointerId !== drag.pointerId) return;
     drag.item.classList.remove('is-dragging');
+    restoreOriginalOrder();
+    stopListening();
     drag = null;
+  }
+
+  function stopListening() {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', finish);
+    window.removeEventListener('pointercancel', cancel);
+  }
+
+  function restoreOriginalOrder() {
+    const items = [...root.querySelectorAll(itemSelector)]
+      .filter(item => groupForItem(item) === drag.group);
+    const parent = items[0]?.parentElement;
+    if (!parent) return;
+    const byId = new Map(items.map(item => [item.dataset.reorderId, item]));
+    drag.originalIds.forEach(id => parent.appendChild(byId.get(id)));
   }
 }
 
