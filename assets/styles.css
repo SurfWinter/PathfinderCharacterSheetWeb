@@ -185,12 +185,23 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 .tag-chip button{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:11px;padding:2px;line-height:1;}
 .tag-input-row{display:flex;gap:6px;}
 .tag-input-row input{flex:1;}
+.tag-suggestions{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
+.tag-suggestion{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:100px;padding:4px 9px;background:var(--surface3);color:var(--text-dim);font:inherit;font-size:11px;cursor:pointer;}
+.tag-suggestion small{color:inherit;opacity:.72;font-size:10px;}
 .item-traits{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;}
 .item-traits .tg{background:var(--surface3);border:1px solid var(--border);border-radius:100px;padding:2px 9px;font-size:10.5px;color:var(--text-dim);}
 
 .tag-chip.resist{border-color:#3a5a3f;background:#1c2b1f;color:#8fd39c;}
 .tag-chip.weak{border-color:#5a3a37;background:#2b1e1c;color:#e0958a;}
 .tag-chip.immune{border-color:#33506b;background:#18242e;color:#8fc0e0;}
+.tag-chip.tone-green,.item-traits .tg.tone-green,.tag-suggestion.tone-green{border-color:#3a5a3f;background:#1c2b1f;color:#8fd39c;}
+.tag-chip.tone-red,.item-traits .tg.tone-red,.tag-suggestion.tone-red{border-color:#5a3a37;background:#2b1e1c;color:#e0958a;}
+.tag-chip.tone-blue,.item-traits .tg.tone-blue,.tag-suggestion.tone-blue{border-color:#33506b;background:#18242e;color:#8fc0e0;}
+.tag-chip.tone-purple,.item-traits .tg.tone-purple,.tag-suggestion.tone-purple{border-color:#55416f;background:#282038;color:#c7a7ed;}
+.tag-chip.tone-deepBlue,.item-traits .tg.tone-deepBlue,.tag-suggestion.tone-deepBlue{border-color:#294b73;background:#17283d;color:#8ab9ed;}
+.tag-chip.tone-gold,.item-traits .tg.tone-gold,.tag-suggestion.tone-gold{border-color:#6c5624;background:#332916;color:#e8ca75;}
+.tag-chip.tone-deepPink,.item-traits .tg.tone-deepPink,.tag-suggestion.tone-deepPink{border-color:#753b61;background:#391c31;color:#ef9bce;}
+.tag-chip.tone-silver,.item-traits .tg.tone-silver,.tag-suggestion.tone-silver{border-color:#64707c;background:#2a3037;color:#c8d0d8;}
 
 .hp-row{display:flex;align-items:stretch;gap:10px;}
 .extra-speed-row{

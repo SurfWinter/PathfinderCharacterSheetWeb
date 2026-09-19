@@ -1,6 +1,8 @@
 // Состояние персонажа, миграции и локальное хранилище.
 
-const STORAGE_KEY = 'pf2_character_v1';
+const STORAGE_KEY = 'pf2_character_v1'; // прежний ключ: используется только для миграции
+const PROFILES_STORAGE_KEY = 'pf2_character_profiles_v1';
+const ACTIVE_PROFILE_SESSION_KEY = 'pf2_active_character_profile_v1';
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
 /* ---------- default data ---------- */
@@ -75,7 +77,7 @@ function defaultCharacter(){
     mode:'setup', // 'setup' | 'play'
     name:'',
     className:'', level:1, mythicPoints:0,
-    traits: [], // дескрипторы персонажа: "Человек", "Нечестивый" и т.п.
+    traits: [], // [{type:'library',id}] или [{type:'custom',name}]
     languages: [], // "Общий", "Эльфийский" и т.п.
     aboutCollapsed:true,
     actionsAllCollapsed:false,
@@ -151,14 +153,37 @@ function migrateAbilities(raw){
   return result;
 }
 
+function normalizeTraits(raw){
+  const values = Array.isArray(raw) ? raw : (!raw ? [] : String(raw).split(','));
+  return values.map(trait=>{
+    if(trait && typeof trait === 'object' && trait.type === 'library' && typeof trait.id === 'string'){
+      return {type:'library', id:trait.id};
+    }
+    const name = typeof trait === 'string' ? trait.trim() : (trait && trait.name ? String(trait.name).trim() : '');
+    return name ? {type:'custom', name} : null;
+  }).filter(Boolean);
+}
 function splitTraitsString(s){
-  if(Array.isArray(s)) return s.slice();
-  if(!s) return [];
-  return String(s).split(',').map(t=>t.trim()).filter(Boolean);
+  return normalizeTraits(s);
 }
 function migrateActions(actions){
   if(!Array.isArray(actions)) return null;
-  return actions.map(a=>Object.assign({}, a, {traits: splitTraitsString(a.traits), favorite: !!a.favorite}));
+  return actions.map(a=>Object.assign({}, a, {traits: normalizeTraits(a.traits), favorite: !!a.favorite}));
+}
+function migrateItems(items){
+  if(!Array.isArray(items)) return [];
+  return items.map(item=>Object.assign({}, item, {traits:normalizeTraits(item.traits)}));
+}
+function migrateBooks(books){
+  const defaults = defaultCharacter().books;
+  return Object.assign(defaults, books||{}, {
+    formulas: Array.isArray(books && books.formulas) ? books.formulas : [],
+    spellbook: Array.isArray(books && books.spellbook) ? books.spellbook.map(spell=>Object.assign({}, spell, {traits:normalizeTraits(spell.traits)})) : [],
+  });
+}
+function migrateFeats(feats){
+  if(!Array.isArray(feats)) return [];
+  return feats.map(feat=>Object.assign({}, feat, {traits:normalizeTraits(feat.traits)}));
 }
 
 function normalizeCharacter(parsed){
@@ -174,29 +199,89 @@ function normalizeCharacter(parsed){
     speeds: Object.assign({}, defaultCharacter().speeds, parsed.speeds||{}, {
       extra: Array.isArray(parsed.speeds && parsed.speeds.extra) ? parsed.speeds.extra : []
     }),
-    equipment: Object.assign(defaultCharacter().equipment, parsed.equipment||{}),
+    equipment: Object.assign(defaultCharacter().equipment, parsed.equipment||{}, {
+      items: migrateItems(parsed.equipment && parsed.equipment.items),
+      storages: Array.isArray(parsed.equipment && parsed.equipment.storages) ? parsed.equipment.storages : [],
+    }),
     spellcasting: Object.assign(defaultCharacter().spellcasting, parsed.spellcasting||{}, {
       focus: Object.assign({spellIds:[], used:0}, (parsed.spellcasting && parsed.spellcasting.focus) || {})
     }),
-    books: Object.assign(defaultCharacter().books, parsed.books||{}),
-    traits: Array.isArray(parsed.traits) ? parsed.traits : [],
+    books: migrateBooks(parsed.books),
+    traits: normalizeTraits(parsed.traits),
     languages: Array.isArray(parsed.languages) ? parsed.languages : [],
     actions: migrateActions(parsed.actions) || defaultCharacter().actions,
+    feats: migrateFeats(parsed.feats),
     skills: migrateSkills(parsed.skills) || defaultCharacter().skills,
   });
 }
 
-function loadCharacter(){
+function loadProfilesState(){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if(!raw) return defaultCharacter();
-    const parsed = JSON.parse(raw);
-    return normalizeCharacter(parsed);
-  }catch(e){ console.warn('load failed', e); return defaultCharacter(); }
+    const raw = localStorage.getItem(PROFILES_STORAGE_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(Array.isArray(parsed.profiles) && parsed.profiles.length){
+        return {version:1, profiles:parsed.profiles.map(profile=>({id:profile.id || uid(), character:normalizeCharacter(profile.character)}))};
+      }
+    }
+
+    // Перенос единственного персонажа из версий до 1.2.1.
+    const legacyRaw = localStorage.getItem(STORAGE_KEY);
+    const character = legacyRaw ? normalizeCharacter(JSON.parse(legacyRaw)) : defaultCharacter();
+    const state = {version:1, profiles:[{id:uid(), character}]};
+    saveProfilesState(state);
+    return state;
+  }catch(e){
+    console.warn('profiles load failed', e);
+    return {version:1, profiles:[{id:uid(), character:defaultCharacter()}]};
+  }
+}
+function saveProfilesState(state){
+  localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(state));
+}
+function activeProfileId(state){
+  const savedId = sessionStorage.getItem(ACTIVE_PROFILE_SESSION_KEY);
+  const profile = state.profiles.find(item=>item.id===savedId) || state.profiles[0];
+  sessionStorage.setItem(ACTIVE_PROFILE_SESSION_KEY, profile.id);
+  return profile.id;
+}
+function loadCharacter(){
+  const state = loadProfilesState();
+  const profile = state.profiles.find(item=>item.id===activeProfileId(state));
+  return normalizeCharacter(profile.character);
 }
 export function saveCharacter(character){
   character.meta.savedAt = Date.now();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(character));
+  const state = loadProfilesState();
+  const profile = state.profiles.find(item=>item.id===activeProfileId(state));
+  profile.character = character;
+  saveProfilesState(state);
+}
+export function listCharacterProfiles(){
+  const state = loadProfilesState();
+  const activeId = activeProfileId(state);
+  return state.profiles.map(profile=>({
+    id:profile.id,
+    name:profile.character.name || 'Безымянный персонаж',
+    active:profile.id===activeId,
+  }));
+}
+export function switchCharacterProfile(id){
+  const state = loadProfilesState();
+  const profile = state.profiles.find(item=>item.id===id);
+  if(!profile) return loadCharacter();
+  sessionStorage.setItem(ACTIVE_PROFILE_SESSION_KEY, profile.id);
+  return normalizeCharacter(profile.character);
+}
+export function createCharacterProfile(name=''){
+  const state = loadProfilesState();
+  const character = defaultCharacter();
+  character.name = name.trim();
+  const profile = {id:uid(), character};
+  state.profiles.push(profile);
+  saveProfilesState(state);
+  sessionStorage.setItem(ACTIVE_PROFILE_SESSION_KEY, profile.id);
+  return character;
 }
 
 

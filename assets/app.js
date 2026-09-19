@@ -1,7 +1,8 @@
-import { ABILITY_DEFS, defaultCharacter, loadCharacter, normalizeCharacter, saveCharacter, uid } from './character-state.js';
+import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterProfiles, loadCharacter, normalizeCharacter, saveCharacter, switchCharacterProfile, uid } from './character-state.js';
 import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
+import { TRAIT_LIBRARY, getLibraryTrait } from './libraries/traits.js';
 
 /* Общие расчёты, используемые вкладками. */
 const PROF_RANKS = ['untrained','trained','expert','master','legendary'];
@@ -238,7 +239,7 @@ function renderCharacterTab(){
   }).join('');
 
   const traitsHtml = CH.traits.length
-    ? CH.traits.map((t,i)=>`<span class="tag-chip">${escapeHtml(t)}${!isPlay() ? `<button type="button" data-trait-del="${i}">✕</button>`:''}</span>`).join('')
+    ? CH.traits.map((t,i)=>traitChipHtml(t, !isPlay() ? `<button type="button" data-trait-del="${i}">✕</button>` : '')).join('')
     : '<div class="empty-hint" style="padding:6px 0;">Дескрипторов пока нет</div>';
 
   const languagesHtml = CH.languages.length
@@ -270,9 +271,10 @@ function renderCharacterTab(){
         <div class="tag-chip-box">${traitsHtml}</div>
         ${!isPlay() ? `
         <div class="tag-input-row">
-          <input type="text" id="traitInput" placeholder="Например: Человек, Нечестивый…">
+          <input type="text" id="traitInput" placeholder="Выберите из библиотеки или введите свой…">
           <button class="btn btn-accent" id="traitAddBtn">+</button>
         </div>` : ''}
+        ${!isPlay() ? '<div class="tag-suggestions" id="traitSuggestions"></div>' : ''}
       </div>
 
       <div class="card">
@@ -457,15 +459,34 @@ function wireCharacterTab(){
   });
 
   const traitAddBtn = byId('traitAddBtn');
-  if(traitAddBtn) traitAddBtn.addEventListener('click', ()=>{
-    const inp = byId('traitInput');
-    const v = inp.value.trim();
-    if(v){ CH.traits.push(v); save(); renderApp(); }
-  });
   const traitInputEl = byId('traitInput');
-  if(traitInputEl) traitInputEl.addEventListener('keydown', e=>{
-    if(e.key==='Enter'){ e.preventDefault(); traitAddBtn.click(); }
+  const traitSuggestionsEl = byId('traitSuggestions');
+  function hasCharacterTrait(candidate){ return CH.traits.some(trait=>traitKey(trait) === traitKey(candidate)); }
+  function renderCharacterTraitSuggestions(){
+    if(!traitSuggestionsEl || !traitInputEl) return;
+    const query = traitInputEl.value.trim().toLocaleLowerCase('ru');
+    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,6) : [];
+    traitSuggestionsEl.innerHTML = '';
+    matches.forEach(trait=>{
+      const option = document.createElement('button');
+      option.type = 'button'; option.className = `tag-suggestion tone-${trait.color}`;
+      option.innerHTML = `<span>${escapeHtml(trait.name)}</span><small>${escapeHtml(trait.category)}</small>`;
+      option.addEventListener('click', ()=>{
+        if(!hasCharacterTrait({type:'library', id:trait.id})) CH.traits.push({type:'library', id:trait.id});
+        save(); renderApp();
+      });
+      traitSuggestionsEl.appendChild(option);
+    });
+  }
+  if(traitAddBtn) traitAddBtn.addEventListener('click', ()=>{
+    const v = traitInputEl.value.trim();
+    const trait = {type:'custom', name:v};
+    if(v && !hasCharacterTrait(trait)){ CH.traits.push(trait); save(); renderApp(); }
   });
+  if(traitInputEl){
+    traitInputEl.addEventListener('input', renderCharacterTraitSuggestions);
+    traitInputEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); traitAddBtn.click(); } });
+  }
   root.querySelectorAll('[data-trait-del]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       CH.traits.splice(Number(btn.dataset.traitDel),1);
@@ -728,6 +749,23 @@ document.getElementById('modalOverlay').addEventListener('click', (e)=>{
 /* Универсальный редактор тегов-дескрипторов (для предметов/заклинаний/черт).
    Создаёт и монтирует DOM-узел, живущий независимо от остального рендера формы,
    поэтому его можно свободно добавлять/удалять теги, не теряя значения других полей. */
+function traitDisplay(trait){
+  if(trait && typeof trait === 'object' && trait.type === 'library'){
+    const libraryTrait = getLibraryTrait(trait.id);
+    if(libraryTrait) return {name:libraryTrait.name, color:libraryTrait.color};
+    return {name:trait.id, color:'default'};
+  }
+  return {name:typeof trait === 'string' ? trait : (trait && trait.name) || '', color:'default'};
+}
+function traitKey(trait){
+  if(trait && typeof trait === 'object' && trait.type === 'library') return `library:${trait.id}`;
+  return `custom:${traitDisplay(trait).name.trim().toLocaleLowerCase('ru')}`;
+}
+function traitChipHtml(trait, extraHtml=''){
+  const view = traitDisplay(trait);
+  return `<span class="tag-chip tone-${view.color}">${escapeHtml(view.name)}${extraHtml}</span>`;
+}
+
 function createTagEditor(initialTags){
   const wrap = document.createElement('div');
   wrap.className = 'tag-editor';
@@ -742,6 +780,10 @@ function createTagEditor(initialTags){
   inputRow.appendChild(input); inputRow.appendChild(addBtn);
   wrap.appendChild(chipBox); wrap.appendChild(inputRow);
 
+  const suggestions = document.createElement('div');
+  suggestions.className = 'tag-suggestions';
+  wrap.appendChild(suggestions);
+
   let tags = (initialTags||[]).slice();
   function renderChips(){
     chipBox.innerHTML = '';
@@ -752,8 +794,9 @@ function createTagEditor(initialTags){
     }
     tags.forEach((t,i)=>{
       const chip = document.createElement('span');
-      chip.className = 'tag-chip';
-      chip.appendChild(document.createTextNode(t));
+      const view = traitDisplay(t);
+      chip.className = `tag-chip tone-${view.color}`;
+      chip.appendChild(document.createTextNode(view.name));
       const x = document.createElement('button');
       x.type = 'button'; x.textContent = '✕';
       x.addEventListener('click', ()=>{ tags.splice(i,1); renderChips(); });
@@ -761,11 +804,32 @@ function createTagEditor(initialTags){
       chipBox.appendChild(chip);
     });
   }
+  function renderSuggestions(){
+    const query = input.value.trim().toLocaleLowerCase('ru');
+    const matches = query ? TRAIT_LIBRARY.filter(t => t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0, 6) : [];
+    suggestions.innerHTML = '';
+    matches.forEach(trait=>{
+      const option = document.createElement('button');
+      option.type = 'button'; option.className = `tag-suggestion tone-${trait.color}`;
+      option.innerHTML = `<span>${escapeHtml(trait.name)}</span><small>${escapeHtml(trait.category)}</small>`;
+      option.addEventListener('click', ()=>addLibraryTag(trait));
+      suggestions.appendChild(option);
+    });
+  }
+  function hasTag(candidate){ return tags.some(tag=>traitKey(tag) === traitKey(candidate)); }
+  function addLibraryTag(trait){
+    const tag = {type:'library', id:trait.id};
+    if(!hasTag(tag)) tags.push(tag);
+    input.value=''; renderSuggestions(); renderChips(); input.focus();
+  }
   function addTag(){
     const v = input.value.trim();
-    if(v){ tags.push(v); input.value=''; renderChips(); input.focus(); }
+    const tag = {type:'custom', name:v};
+    if(v && !hasTag(tag)) tags.push(tag);
+    if(v){ input.value=''; renderSuggestions(); renderChips(); input.focus(); }
   }
   addBtn.addEventListener('click', addTag);
+  input.addEventListener('input', renderSuggestions);
   input.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addTag(); } });
   renderChips();
 
@@ -773,7 +837,7 @@ function createTagEditor(initialTags){
 }
 function tagsMetaHtml(tags){
   if(!tags || !tags.length) return '';
-  return `<div class="item-traits">${tags.map(t=>`<span class="tg">${escapeHtml(t)}</span>`).join('')}</div>`;
+  return `<div class="item-traits">${tags.map(t=>{ const view=traitDisplay(t); return `<span class="tg tone-${view.color}">${escapeHtml(view.name)}</span>`; }).join('')}</div>`;
 }
 
 
@@ -1680,9 +1744,21 @@ function wireFeatsTab(){
    ========================================================================= */
 function renderMoreTab(){
   const savedDate = CH.meta.savedAt ? new Date(CH.meta.savedAt).toLocaleString('ru-RU') : '—';
+  const profiles = listCharacterProfiles();
   return `
     ${renderTopbar('Ещё', '')}
     <div class="page active">
+      <div class="card">
+        <div class="more-item" style="border:none;padding-top:0;">
+          <div><div class="t">Персонаж в этой вкладке</div><div class="d">Каждая вкладка может работать со своим персонажем.</div></div>
+        </div>
+        <div class="field" style="margin:0 0 10px;">
+          <select id="characterProfileSelect">
+            ${profiles.map(profile=>`<option value="${escapeAttr(profile.id)}" ${profile.active?'selected':''}>${escapeHtml(profile.name)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-accent btn-block" id="newCharacterBtn">+ Новый персонаж</button>
+      </div>
       <div class="card">
         <div class="more-item">
           <div><div class="t">Экспорт персонажа</div><div class="d">Сохранить конфигурацию в файл .xml</div></div>
@@ -1707,6 +1783,27 @@ function renderMoreTab(){
 }
 
 function wireMoreTab(){
+  byId('characterProfileSelect').addEventListener('change', e=>{
+    CH = switchCharacterProfile(e.target.value);
+    activeTab = 'character';
+    renderApp();
+    showToast('Персонаж переключён');
+  });
+  byId('newCharacterBtn').addEventListener('click', ()=>{
+    openModal('Новый персонаж', `
+      <div class="field"><label class="field-label">Имя персонажа</label><input type="text" id="newCharacterName" placeholder="Можно указать позже"></div>
+      <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Создать</button></div>
+    `, ()=>{
+      byId('mfCancel').addEventListener('click', closeModal);
+      byId('mfSave').addEventListener('click', ()=>{
+        CH = createCharacterProfile(byId('newCharacterName').value);
+        closeModal();
+        activeTab = 'character';
+        renderApp();
+        showToast('Создан новый персонаж');
+      });
+    });
+  });
   byId('exportBtn').addEventListener('click', ()=>{
     const xml = characterToXml(CH);
     const blob = new Blob([xml], {type:'application/xml'});
