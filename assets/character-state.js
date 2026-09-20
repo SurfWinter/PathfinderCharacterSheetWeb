@@ -1,4 +1,5 @@
 // Состояние персонажа, миграции и локальное хранилище.
+import { bagCompartmentLocation, getLibraryItem, instantiateLibraryItem, isBagItem, normalizeBagData, normalizeCategory } from './libraries/items.js';
 
 const STORAGE_KEY = 'pf2_character_v1'; // прежний ключ: используется только для миграции
 const PROFILES_STORAGE_KEY = 'pf2_character_profiles_v1';
@@ -108,8 +109,8 @@ function defaultCharacter(){
     skills: BASE_SKILLS.map(s=>({id:uid(), name:s.name, ability:s.ability, proficiency:'untrained', otherBonus:0, multi:false})),
     actions: BASIC_ACTIONS.map(a=>({id:uid(), name:a.name, type:a.type, traits: splitTraitsString(a.traits), desc:a.desc, fromFeat:false, favorite:false})),
     equipment:{
-      items: [], // {id,name,qty,bulk,location,note,isCurrency,traits}
-      storages: [], // {id,name}
+      items: [instantiateLibraryItem(getLibraryItem('backpack'), uid)],
+      storages: [], // {id,name} — дом/банк, без веса
     },
     spellcasting:{
       type:'none', // none | prepared | spontaneous
@@ -170,9 +171,126 @@ function migrateActions(actions){
   if(!Array.isArray(actions)) return null;
   return actions.map(a=>Object.assign({}, a, {traits: normalizeTraits(a.traits), favorite: !!a.favorite}));
 }
-function migrateItems(items){
-  if(!Array.isArray(items)) return [];
-  return items.map(item=>Object.assign({}, item, {traits:normalizeTraits(item.traits)}));
+function normalizeRune(raw){
+  const rune = raw || {};
+  return {
+    id: rune.id || uid(),
+    libraryId: rune.libraryId || null,
+    name: rune.name || 'Руна',
+    traits: normalizeTraits(rune.traits),
+    desc: rune.desc || '',
+  };
+}
+function normalizeEquipmentItem(raw){
+  if(!raw) return null;
+  if(raw.isCurrency){
+    return {
+      id: raw.id || uid(),
+      name: raw.name || 'Монеты',
+      qty: Math.max(0, Number(raw.qty) || 0),
+      bulk: 0,
+      location: raw.location || 'worn',
+      note: '',
+      isCurrency: true,
+      currencyKey: raw.currencyKey,
+      custom: false,
+      traits: [],
+    };
+  }
+  const category = normalizeCategory(raw.category || 'other');
+  const item = {
+    id: raw.id || uid(),
+    libraryId: raw.libraryId || null,
+    name: raw.name || 'Без названия',
+    category,
+    qty: raw.qty == null ? 1 : Math.max(0, Number(raw.qty) || 0),
+    bulk: Number(raw.bulk) || 0,
+    location: raw.location || 'worn',
+    note: raw.note || '',
+    desc: raw.desc || '',
+    traits: normalizeTraits(raw.traits),
+    isCurrency: false,
+    custom: raw.custom !== false,
+    runes: Array.isArray(raw.runes) ? raw.runes.map(normalizeRune) : [],
+    weapon: raw.weapon || null,
+    armor: raw.armor || null,
+    consumable: raw.consumable || null,
+  };
+  if(category === 'bag') item.bag = normalizeBagData(raw.bag, uid);
+  return item;
+}
+function firstBagDestination(items){
+  const bag = items.find(item=>isBagItem(item) && item.location === 'worn') || items.find(isBagItem);
+  if(!bag) return 'worn';
+  return bagCompartmentLocation(bag.id, bag.bag.compartments[0].id);
+}
+function migrateEquipment(equipment){
+  const source = equipment || {};
+  const storages = Array.isArray(source.storages) ? source.storages : [];
+  const storageIds = new Set(storages.map(storage=>storage.id));
+  let items = (Array.isArray(source.items) ? source.items : []).map(normalizeEquipmentItem).filter(Boolean);
+
+  items = items.map(item=>{
+    if(item.isCurrency || isBagItem(item)) return item;
+    if(!/^рюкзак$/i.test(String(item.name || '').trim())) return item;
+    const bag = instantiateLibraryItem(getLibraryItem('backpack'), uid);
+    bag.id = item.id;
+    bag.note = item.note || '';
+    bag.desc = item.desc || bag.desc;
+    bag.traits = item.traits && item.traits.length ? item.traits : bag.traits;
+    let loc = item.location || 'worn';
+    if(loc === 'carried' || String(loc).startsWith('bag:')) loc = 'worn';
+    bag.location = loc;
+    return bag;
+  }).filter(item=>{
+    if(item.isCurrency) return true;
+    const looksLikeHackPack = !isBagItem(item) && /рюкзак/i.test(item.name || '') && Number(item.bulk) < 0;
+    return !looksLikeHackPack;
+  });
+
+  if(!items.some(isBagItem)){
+    items.push(instantiateLibraryItem(getLibraryItem('backpack'), uid));
+  }
+
+  const fallback = firstBagDestination(items);
+  items.forEach(item=>{
+    if(item.location === 'carried') item.location = fallback;
+    if(isBagItem(item)){
+      const parsed = String(item.location || '');
+      if(parsed.startsWith('bag:')) item.location = 'worn';
+      if(item.location !== 'worn' && !storageIds.has(item.location)) item.location = 'worn';
+    } else if(!item.isCurrency){
+      if(item.location !== 'worn' && !storageIds.has(item.location) && !String(item.location).startsWith('bag:')){
+        item.location = fallback;
+      }
+    }
+  });
+
+  const bagIds = new Set(items.filter(isBagItem).map(item=>item.id));
+  items.forEach(item=>{
+    if(!String(item.location).startsWith('bag:')) return;
+    const parts = String(item.location).split(':');
+    if(!bagIds.has(parts[1])) item.location = fallback;
+  });
+
+  const merged = [];
+  const currencyIndex = new Map();
+  items.forEach(item=>{
+    if(!item.isCurrency){
+      merged.push(item);
+      return;
+    }
+    const key = `${item.currencyKey}::${item.location}`;
+    const existing = currencyIndex.get(key);
+    if(existing){
+      existing.qty += Number(item.qty) || 0;
+    } else {
+      currencyIndex.set(key, item);
+      merged.push(item);
+    }
+  });
+
+  return {items: merged, storages};
 }
 function migrateBooks(books){
   const defaults = defaultCharacter().books;
@@ -199,10 +317,7 @@ function normalizeCharacter(parsed){
     speeds: Object.assign({}, defaultCharacter().speeds, parsed.speeds||{}, {
       extra: Array.isArray(parsed.speeds && parsed.speeds.extra) ? parsed.speeds.extra : []
     }),
-    equipment: Object.assign(defaultCharacter().equipment, parsed.equipment||{}, {
-      items: migrateItems(parsed.equipment && parsed.equipment.items),
-      storages: Array.isArray(parsed.equipment && parsed.equipment.storages) ? parsed.equipment.storages : [],
-    }),
+    equipment: migrateEquipment(parsed.equipment),
     spellcasting: Object.assign(defaultCharacter().spellcasting, parsed.spellcasting||{}, {
       focus: Object.assign({spellIds:[], used:0}, (parsed.spellcasting && parsed.spellcasting.focus) || {})
     }),

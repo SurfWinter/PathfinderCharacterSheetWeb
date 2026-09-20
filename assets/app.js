@@ -3,6 +3,12 @@ import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
 import { TRAIT_LIBRARY, getLibraryTrait } from './libraries/traits.js';
+import {
+  ITEM_CATEGORY_LABELS,
+  bagCompartmentLocation, bagEffectiveBulk, canHoldRunes, compartmentContentsBulk,
+  emptyCustomItem, getLibraryItem, instantiateLibraryItem, isBagItem, itemBulkValue,
+  normalizeBagData, normalizeCategory, parseItemLocation, searchLibraryItems, wornCarriedBulk,
+} from './libraries/items.js';
 
 /* Общие расчёты, используемые вкладками. */
 const PROF_RANKS = ['untrained','trained','expert','master','legendary'];
@@ -990,159 +996,641 @@ const CURRENCY_DEFS = [
   {key:'gp', name:'Золотые монеты'}, {key:'pp', name:'Платиновые монеты'},
 ];
 
-function ensureCurrencyItems(){
-  CURRENCY_DEFS.forEach(c=>{
-    if(!CH.equipment.items.find(i=>i.isCurrency && i.currencyKey===c.key)){
-      CH.equipment.items.push({id:uid(), name:c.name, qty:0, bulk:0, location:'carried', note:'', isCurrency:true, currencyKey:c.key, custom:false});
-    }
-  });
+function formatBulk(n){
+  n = Number(n) || 0;
+  if(Math.abs(n) < 0.0005) return '0';
+  const rounded = Math.round(n * 1000) / 1000;
+  return String(rounded);
 }
-
+function fallbackItemLocation(excludeBagId){
+  const bags = CH.equipment.items.filter(item=>isBagItem(item) && item.id !== excludeBagId);
+  const bag = bags.find(item=>item.location === 'worn') || bags[0];
+  if(!bag) return 'worn';
+  return bagCompartmentLocation(bag.id, bag.bag.compartments[0].id);
+}
 function locationLabel(loc){
-  if(loc==='worn') return 'Надето';
-  if(loc==='carried') return 'В рюкзаке';
-  const st = CH.equipment.storages.find(s=>s.id===loc);
-  return st ? st.name : 'В рюкзаке';
-}
-function locationOptions(current){
-  let opts = [`<option value="worn" ${current==='worn'?'selected':''}>Надето</option>`,
-              `<option value="carried" ${current==='carried'?'selected':''}>В рюкзаке</option>`];
-  CH.equipment.storages.forEach(s=>{
-    opts.push(`<option value="${s.id}" ${current===s.id?'selected':''}>${escapeHtml(s.name)}</option>`);
-  });
-  return opts.join('');
-}
-function itemBulkValue(item){
-  if(item.isCurrency){
-    // 1000 монет = 1 объём (по правилам)
-    return (Number(item.qty||0)/1000);
+  if(loc === 'worn') return 'Надето';
+  if(loc === 'carried') return 'В сумке';
+  const parsed = parseItemLocation(loc);
+  if(parsed.type === 'bag'){
+    const bag = CH.equipment.items.find(item=>item.id === parsed.bagId);
+    if(!bag) return 'Сумка';
+    const compartment = bag.bag.compartments.find(entry=>entry.id === parsed.compartmentId);
+    if(compartment && compartment.name) return `${bag.name} · ${compartment.name}`;
+    return bag.name;
   }
-  return Number(item.bulk||0) * Number(item.qty||1);
+  const storage = CH.equipment.storages.find(entry=>entry.id === loc);
+  return storage ? storage.name : 'Надето';
 }
-
-function renderEquipmentTab(){
-  ensureCurrencyItems();
-  const items = CH.equipment.items;
-  const worn = items.filter(i=>i.location==='worn');
-  const carried = items.filter(i=>i.location==='carried');
-  const carriedTotalBulk = worn.concat(carried).reduce((s,i)=>s+itemBulkValue(i),0);
-
-  const strMod = CH.abilities.str.mod;
-  const encumbered = 5 + strMod;
-  const maxBulk = 10 + strMod;
-  const bulkPct = clamp((carriedTotalBulk/maxBulk)*100, 0, 100);
-
-  function itemRow(i, group){
-    if(i.isCurrency){
-      return `
-      <div class="eq-item" data-item-id="${i.id}">
-        <div class="nm"><div class="n">${escapeHtml(i.name)}</div></div>
-        <div class="qty"><input type="number" min="0" data-qty="${i.id}" value="${i.qty}"></div>
-        <select class="locsel" data-loc="${i.id}">${locationOptions(i.location)}</select>
-        <span style="width:18px;display:inline-block"></span>
-      </div>`;
-    }
-    return `
-    <div class="list-item" data-item-id="${i.id}" data-reorder-id="${i.id}" data-reorder-group="${i.location}">
+function locationOptions(current, opts={}){
+  const options = [`<option value="worn" ${current==='worn'?'selected':''}>Надето</option>`];
+  if(!opts.forBag){
+    CH.equipment.items.filter(isBagItem).forEach(bag=>{
+      bag.bag.compartments.forEach(compartment=>{
+        const value = bagCompartmentLocation(bag.id, compartment.id);
+        const label = compartment.name ? `${bag.name} · ${compartment.name}` : bag.name;
+        options.push(`<option value="${escapeAttr(value)}" ${current===value?'selected':''}>${escapeHtml(label)}</option>`);
+      });
+    });
+  }
+  CH.equipment.storages.forEach(storage=>{
+    options.push(`<option value="${escapeAttr(storage.id)}" ${current===storage.id?'selected':''}>${escapeHtml(storage.name)}</option>`);
+  });
+  return options.join('');
+}
+function getCurrencyQty(location, key){
+  const item = CH.equipment.items.find(entry=>entry.isCurrency && entry.currencyKey === key && entry.location === location);
+  return item ? Math.max(0, Number(item.qty) || 0) : 0;
+}
+function setCurrencyQty(location, key, qty){
+  qty = Math.max(0, Math.floor(Number(qty) || 0));
+  const existing = CH.equipment.items.find(entry=>entry.isCurrency && entry.currencyKey === key && entry.location === location);
+  if(qty === 0){
+    if(existing) CH.equipment.items = CH.equipment.items.filter(entry=>entry !== existing);
+    return;
+  }
+  if(existing){
+    existing.qty = qty;
+    return;
+  }
+  const def = CURRENCY_DEFS.find(entry=>entry.key === key);
+  CH.equipment.items.push({
+    id: uid(), name: def.name, qty, bulk: 0, location, note: '',
+    isCurrency: true, currencyKey: key, custom: false, traits: [],
+  });
+}
+function currencyGridHtml(location){
+  return `<div class="currency-grid">${CURRENCY_DEFS.map(def=>`
+    <label class="currency-cell">${escapeHtml(def.name)}
+      <input type="number" min="0" step="1" data-currency="${escapeAttr(location + '::' + def.key)}" value="${getCurrencyQty(location, def.key)}">
+    </label>`).join('')}</div>`;
+}
+function fillBarHtml(used, cap){
+  const over = used > cap;
+  const pct = cap > 0 ? clamp((used / cap) * 100, 0, 100) : (used > 0 ? 100 : 0);
+  return `
+    <div class="weight-summary"><span>${formatBulk(used)} / ${formatBulk(cap)}</span>${over ? '<span class="comp-over">Переполнена</span>' : ''}</div>
+    <div class="weight-bar"><div class="weight-bar-fill ${over ? 'over' : ''}" style="width:${pct}%"></div></div>
+  `;
+}
+function itemStatsHtml(item){
+  if(item.weapon){
+    const w = item.weapon;
+    const parts = [w.damage, w.damageType, w.group, w.hands ? `${w.hands} рук.` : '', w.range, w.reload !== '' && w.reload != null ? `перезарядка ${w.reload}` : '', w.ammo].filter(part=>part);
+    if(parts.length) return `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>`;
+  }
+  if(item.armor){
+    const a = item.armor;
+    const parts = [
+      a.ac ? `КБ ${a.ac}` : '',
+      a.dexCap ? `макс. Ловк. ${a.dexCap}` : '',
+      a.armorCategory, a.group,
+      a.speedPenalty ? `скорость ${a.speedPenalty}` : '',
+      a.strength ? `сила ${a.strength}` : '',
+    ].filter(Boolean);
+    if(parts.length) return `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>`;
+  }
+  if(item.consumable){
+    const c = item.consumable;
+    const parts = [c.usage, c.activation].filter(Boolean);
+    if(parts.length) return `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>`;
+  }
+  return '';
+}
+function runesHtml(item){
+  if(!item.runes || !item.runes.length) return '';
+  return `<div class="rune-list">${item.runes.map(rune=>`<span class="rune-chip">${escapeHtml(rune.name || 'Руна')}</span>`).join('')}</div>`;
+}
+function regularItemsAt(location){
+  return CH.equipment.items.filter(item=>!item.isCurrency && !isBagItem(item) && item.location === location);
+}
+function bagsAt(location){
+  return CH.equipment.items.filter(item=>isBagItem(item) && item.location === location);
+}
+function itemRowHtml(item){
+  return `
+    <div class="list-item" data-item-id="${item.id}" data-reorder-id="${item.id}" data-reorder-group="${escapeAttr(item.location)}">
       <div class="list-item-head" data-item-toggle>
         <div class="nm">
-          <div class="n">${escapeHtml(i.name)}</div>
-          <div class="meta">объём ${i.bulk||0}${i.note ? ' · '+escapeHtml(i.note) : ''}</div>
-          ${tagsMetaHtml(i.traits)}
+          <div class="n">${escapeHtml(item.name)}</div>
+          <div class="meta">${escapeHtml(ITEM_CATEGORY_LABELS[item.category] || '')} · объём ${formatBulk(item.bulk)}${item.note ? ' · ' + escapeHtml(item.note) : ''}</div>
+          ${itemStatsHtml(item)}
+          ${tagsMetaHtml(item.traits)}
+          ${runesHtml(item)}
         </div>
       </div>
       <div class="eq-item-controls">
         <span class="drag-handle" data-equipment-drag-handle aria-label="Перетащить предмет" title="Перетащить предмет">⠿</span>
-        <div class="qty"><input type="number" min="0" data-qty="${i.id}" value="${i.qty}"></div>
-        <select class="locsel" data-loc="${i.id}">${locationOptions(i.location)}</select>
-        <button class="skill-del" data-item-edit="${i.id}" title="Изменить">✎</button>
-        ${i.custom !== false ? `<button class="skill-del" data-item-del="${i.id}">✕</button>` : '<span style="width:18px;display:inline-block"></span>'}
+        <div class="qty"><input type="number" min="0" data-qty="${item.id}" value="${item.qty}"></div>
+        <select class="locsel" data-loc="${item.id}">${locationOptions(item.location)}</select>
+        <button class="skill-del" data-item-edit="${item.id}" title="Изменить">✎</button>
+        ${item.custom !== false ? `<button class="skill-del" data-item-del="${item.id}" title="Удалить">✕</button>` : '<span style="width:18px;display:inline-block"></span>'}
       </div>
-      <div class="list-item-body">${i.desc ? escapeHtml(i.desc) : 'Нет описания'}</div>
+      <div class="list-item-body">${item.desc ? escapeHtml(item.desc) : 'Нет описания'}</div>
     </div>`;
-  }
-
-  const wornHtml = worn.map(i=>itemRow(i, worn)).join('') || '<div class="empty-hint">Ничего не надето</div>';
-  const carriedHtml = carried.map(i=>itemRow(i, carried)).join('') || '<div class="empty-hint">Рюкзак пуст</div>';
-
-  const storagesHtml = CH.equipment.storages.map(st=>{
-    const stItems = items.filter(i=>i.location===st.id);
+}
+function bagCardHtml(bag){
+  const used = bag.bag.compartments.reduce((sum, compartment)=>sum + compartmentContentsBulk(CH.equipment.items, bag, compartment), 0);
+  const effective = bagEffectiveBulk(CH.equipment.items, bag);
+  const weightNote = bag.bag.weightMode === 'fixed'
+    ? `фиксированный вес ${formatBulk(bag.bulk)}`
+    : `вес ${formatBulk(effective)}${bag.bag.ignoreBulk ? ` (первые ${formatBulk(bag.bag.ignoreBulk)} не считаются)` : ''}`;
+  const compartments = bag.bag.compartments.map(compartment=>{
+    const location = bagCompartmentLocation(bag.id, compartment.id);
+    const contents = regularItemsAt(location);
+    const title = compartment.name || (bag.bag.compartments.length > 1 ? 'Отсек' : 'Содержимое');
     return `
-    <div class="card" data-storage-id="${st.id}">
-      <div class="card-header">
-        <h3>${escapeHtml(st.name)}</h3>
-        <button class="btn btn-sm btn-danger" data-storage-del="${st.id}">Удалить раздел</button>
+      <div class="compartment-block">
+        <div class="compartment-title">${escapeHtml(title)}</div>
+        ${fillBarHtml(compartmentContentsBulk(CH.equipment.items, bag, compartment), compartment.capacity)}
+        ${currencyGridHtml(location)}
+        ${contents.map(itemRowHtml).join('') || '<div class="empty-hint" style="padding:8px 0;">Пусто</div>'}
+        <button class="btn btn-sm btn-block location-add" data-add-item-loc="${escapeAttr(location)}">+ Предмет в этот отсек</button>
+      </div>`;
+  }).join('');
+  return `
+    <div class="bag-card" data-bag-id="${bag.id}">
+      <div class="bag-card-head" data-bag-toggle>
+        <div>
+          <div class="n">${escapeHtml(bag.name)}</div>
+          <div class="meta">${weightNote} · внутри ${formatBulk(used)}</div>
+          ${tagsMetaHtml(bag.traits)}
+        </div>
+        <div class="bag-card-actions">
+          <select class="locsel" data-loc="${bag.id}">${locationOptions(bag.location, {forBag:true})}</select>
+          <button class="skill-del" data-item-edit="${bag.id}" title="Изменить">✎</button>
+          <button class="skill-del" data-item-del="${bag.id}" title="Удалить">✕</button>
+        </div>
+      </div>
+      <div class="bag-desc">${bag.desc ? escapeHtml(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
+      ${compartments}
+    </div>`;
+}
+
+function renderEquipmentTab(){
+  const items = CH.equipment.items;
+  const carriedTotalBulk = wornCarriedBulk(items);
+  const strMod = CH.abilities.str.mod;
+  const encumbered = 5 + strMod;
+  const maxBulk = 10 + strMod;
+  const bulkPct = maxBulk > 0 ? clamp((carriedTotalBulk / maxBulk) * 100, 0, 100) : (carriedTotalBulk > 0 ? 100 : 0);
+  const over = carriedTotalBulk > maxBulk;
+
+  const wornBags = bagsAt('worn').map(bagCardHtml).join('');
+  const wornItems = regularItemsAt('worn').map(itemRowHtml).join('') || (!bagsAt('worn').length ? '<div class="empty-hint">Ничего не надето</div>' : '');
+
+  const storagesHtml = CH.equipment.storages.map(storage=>{
+    const bags = bagsAt(storage.id).map(bagCardHtml).join('');
+    const list = regularItemsAt(storage.id).map(itemRowHtml).join('');
+    return `
+    <div class="card" data-storage-id="${storage.id}">
+      <div class="card-header" style="cursor:default;">
+        <h3>${escapeHtml(storage.name)}</h3>
+        <button class="btn btn-sm btn-danger" data-storage-del="${storage.id}">Удалить</button>
       </div>
       <div class="card-body" style="display:block;">
-        ${stItems.map(i=>itemRow(i, stItems)).join('') || '<div class="empty-hint">Пусто</div>'}
+        <div class="empty-hint" style="padding:0 0 8px;text-align:left;">Не даёт веса персонажу</div>
+        ${currencyGridHtml(storage.id)}
+        ${bags}
+        ${list || (!bags ? '<div class="empty-hint">Пусто</div>' : '')}
+        <button class="btn btn-sm btn-block location-add" data-add-item-loc="${escapeAttr(storage.id)}">+ Предмет сюда</button>
       </div>
     </div>`;
   }).join('');
 
   return `
-    ${renderTopbar('Снаряжение', `Носимый объём: ${carriedTotalBulk.toFixed(2)} / ${maxBulk}`)}
+    ${renderTopbar('Снаряжение', `Носимый объём: ${formatBulk(carriedTotalBulk)} / ${maxBulk}`)}
     <div class="page active">
-
       <div class="card">
-        <div class="weight-summary"><span>Носимый объём</span><span>${carriedTotalBulk.toFixed(2)} / ${maxBulk} (утомление с ${encumbered})</span></div>
-        <div class="weight-bar"><div class="weight-bar-fill" style="width:${bulkPct}%"></div></div>
+        <div class="weight-summary"><span>Носимый объём</span><span>${formatBulk(carriedTotalBulk)} / ${maxBulk} (утомление с ${encumbered})</span></div>
+        <div class="weight-bar"><div class="weight-bar-fill ${over ? 'over' : ''}" style="width:${bulkPct}%"></div></div>
       </div>
 
       <div class="card">
         <h3 style="margin-bottom:8px;">Надето</h3>
-        ${wornHtml}
-      </div>
-
-      <div class="card">
-        <h3 style="margin-bottom:8px;">В рюкзаке</h3>
-        ${carriedHtml}
+        ${currencyGridHtml('worn')}
+        ${wornBags}
+        ${wornItems}
       </div>
 
       ${storagesHtml}
 
-      <div class="row" style="margin-bottom:12px;">
-        <button class="btn btn-accent btn-block" id="addItemBtn">+ Добавить предмет</button>
-        <button class="btn btn-block" id="addStorageBtn">+ Доп. раздел</button>
+      <div class="eq-toolbar">
+        <div class="row">
+          <button class="btn btn-accent btn-block" id="addItemBtn">+ Предмет</button>
+          <button class="btn btn-accent btn-block" id="addBagBtn">+ Сумка</button>
+        </div>
+        <button class="btn btn-block" id="addStorageBtn">+ Хранилище</button>
       </div>
     </div>
   `;
 }
 
-function itemFormHtml(i){
-  i = i || {name:'', qty:1, bulk:0, note:'', location:'carried', desc:''};
+function weaponFieldsHtml(weapon){
+  const w = weapon || {damage:'', damageType:'', group:'', hands:'', range:'', reload:'', ammo:''};
   return `
-    <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" value="${escapeAttr(i.name)}"></div>
-    <div class="row2">
-      <div class="field"><label class="field-label">Количество</label><input type="number" id="mfQty" min="0" value="${i.qty}"></div>
-      <div class="field"><label class="field-label">Объём (Bulk) за штуку</label><input type="number" step="0.1" id="mfBulk" value="${i.bulk}"></div>
+    <div class="form-section" data-cat-section="weapon">
+      <h4>Оружие</h4>
+      <div class="row2">
+        <div class="field"><label class="field-label">Урон</label><input type="text" id="mfWDamage" value="${escapeAttr(w.damage)}"></div>
+        <div class="field"><label class="field-label">Тип урона</label><input type="text" id="mfWDamageType" value="${escapeAttr(w.damageType)}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label class="field-label">Группа</label><input type="text" id="mfWGroup" value="${escapeAttr(w.group)}"></div>
+        <div class="field"><label class="field-label">Руки</label><input type="text" id="mfWHands" value="${escapeAttr(w.hands)}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label class="field-label">Дистанция</label><input type="text" id="mfWRange" value="${escapeAttr(w.range)}"></div>
+        <div class="field"><label class="field-label">Перезарядка</label><input type="text" id="mfWReload" value="${escapeAttr(w.reload)}"></div>
+      </div>
+      <div class="field"><label class="field-label">Боеприпасы</label><input type="text" id="mfWAmmo" value="${escapeAttr(w.ammo)}"></div>
+    </div>`;
+}
+function armorFieldsHtml(armor){
+  const a = armor || {ac:'', dexCap:'', group:'', armorCategory:'', speedPenalty:'', strength:''};
+  return `
+    <div class="form-section" data-cat-section="armor">
+      <h4>Броня</h4>
+      <div class="row2">
+        <div class="field"><label class="field-label">КБ</label><input type="text" id="mfAAc" value="${escapeAttr(a.ac)}"></div>
+        <div class="field"><label class="field-label">Макс. Ловк.</label><input type="text" id="mfADexCap" value="${escapeAttr(a.dexCap)}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label class="field-label">Группа</label><input type="text" id="mfAGroup" value="${escapeAttr(a.group)}"></div>
+        <div class="field"><label class="field-label">Категория</label><input type="text" id="mfACat" value="${escapeAttr(a.armorCategory)}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label class="field-label">Штраф скорости</label><input type="text" id="mfASpeed" value="${escapeAttr(a.speedPenalty)}"></div>
+        <div class="field"><label class="field-label">Сила</label><input type="text" id="mfAStr" value="${escapeAttr(a.strength)}"></div>
+      </div>
+    </div>`;
+}
+function consumableFieldsHtml(consumable){
+  const c = consumable || {usage:'', activation:''};
+  return `
+    <div class="form-section" data-cat-section="consumable">
+      <h4>Расходник</h4>
+      <div class="row2">
+        <div class="field"><label class="field-label">Использование</label><input type="text" id="mfCUsage" value="${escapeAttr(c.usage)}"></div>
+        <div class="field"><label class="field-label">Активация</label><input type="text" id="mfCAct" value="${escapeAttr(c.activation)}"></div>
+      </div>
+    </div>`;
+}
+function compartmentRowHtml(compartment){
+  return `
+    <div class="compartment-editor-row" data-comp-id="${escapeAttr(compartment.id)}">
+      <input type="text" data-comp-name placeholder="Название отсека" value="${escapeAttr(compartment.name || '')}">
+      <input type="number" data-comp-cap step="0.1" min="0" placeholder="Вмест." value="${compartment.capacity}">
+      <button type="button" class="skill-del" data-comp-del title="Удалить отсек">✕</button>
+    </div>`;
+}
+function bagFieldsHtml(bag){
+  const data = bag || normalizeBagData({weightMode:'contents', ignoreBulk:0, capacity:4, cell:1}, uid);
+  return `
+    <div class="form-section" data-cat-section="bag">
+      <h4>Сумка</h4>
+      <div class="row2">
+        <div class="field"><label class="field-label">Формула веса</label>
+          <select id="mfBagMode">
+            <option value="contents" ${data.weightMode==='contents'?'selected':''}>Содержимое минус игнор</option>
+            <option value="fixed" ${data.weightMode==='fixed'?'selected':''}>Фиксированный вес</option>
+          </select>
+        </div>
+        <div class="field" id="mfIgnoreWrap"><label class="field-label">Не учитывать объём</label>
+          <input type="number" id="mfBagIgnore" step="0.1" min="0" value="${data.ignoreBulk}">
+        </div>
+      </div>
+      <div class="field-label" style="margin-bottom:6px;">Отсеки</div>
+      <div id="mfCompList">${data.compartments.map(compartmentRowHtml).join('')}</div>
+      <button type="button" class="btn btn-sm" id="mfAddComp">+ Отсек</button>
+    </div>`;
+}
+function itemFormHtml(item, opts={}){
+  item = item || emptyCustomItem(opts.bagOnly ? 'bag' : 'other', uid);
+  const cat = normalizeCategory(item.category);
+  const catOpts = Object.entries(ITEM_CATEGORY_LABELS).map(([id, label])=>
+    `<option value="${id}" ${cat===id?'selected':''}>${label}</option>`
+  ).join('');
+  return `
+    <div class="field">
+      <label class="field-label">Название</label>
+      <input type="text" id="mfName" data-library-id="${escapeAttr(item.libraryId || '')}" value="${escapeAttr(item.name)}" autocomplete="off">
+      ${opts.isNew ? '<div id="mfItemSuggestions" class="tag-suggestions"></div><div class="hint-line">Начните вводить название — появятся предметы из библиотеки</div>' : ''}
     </div>
-    <div class="field"><label class="field-label">Где находится</label><select id="mfLoc">${locationOptions(i.location)}</select></div>
-    <div class="field"><label class="field-label">Заметка</label><input type="text" id="mfNote" value="${escapeAttr(i.note)}"></div>
-    <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(i.desc)}</textarea></div>
+    <div class="row2">
+      <div class="field"><label class="field-label">Количество</label><input type="number" id="mfQty" min="0" value="${item.qty == null ? 1 : item.qty}"></div>
+      <div class="field"><label class="field-label">Объём за штуку</label><input type="number" id="mfBulk" step="0.1" value="${item.bulk || 0}"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label class="field-label">Категория</label>
+        <select id="mfCategory" ${opts.lockCategory ? 'disabled' : ''}>${catOpts}</select>
+      </div>
+      <div class="field"><label class="field-label">Где находится</label>
+        <select id="mfLoc">${locationOptions(item.location || (opts.lockCategory ? 'worn' : fallbackItemLocation()), {forBag: cat === 'bag' || opts.lockCategory})}</select>
+      </div>
+    </div>
+    <div class="field"><label class="field-label">Заметка</label><input type="text" id="mfNote" value="${escapeAttr(item.note)}"></div>
+    <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(item.desc)}</textarea></div>
     <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
+    ${weaponFieldsHtml(item.weapon)}
+    ${armorFieldsHtml(item.armor)}
+    ${consumableFieldsHtml(item.consumable)}
+    ${bagFieldsHtml(item.bag)}
+    <div class="form-section" data-cat-section="weapon,armor,shield">
+      <h4>Руны</h4>
+      <div id="mfRunesContainer"></div>
+    </div>
   `;
+}
+function syncCategorySections(){
+  const cat = byId('mfCategory').value;
+  document.querySelectorAll('[data-cat-section]').forEach(el=>{
+    const need = el.dataset.catSection.split(',');
+    el.style.display = need.includes(cat) ? '' : 'none';
+  });
+  const loc = byId('mfLoc');
+  if(loc){
+    const current = loc.value;
+    loc.innerHTML = locationOptions(current, {forBag: cat === 'bag'});
+    if(cat === 'bag' && parseItemLocation(current).type === 'bag') loc.value = 'worn';
+  }
+  const ignoreWrap = byId('mfIgnoreWrap');
+  const mode = byId('mfBagMode');
+  if(ignoreWrap && mode) ignoreWrap.style.display = mode.value === 'contents' ? '' : 'none';
+}
+function readCompartmentsFromForm(){
+  return [...document.querySelectorAll('#mfCompList .compartment-editor-row')].map(row=>({
+    id: row.dataset.compId || uid(),
+    name: row.querySelector('[data-comp-name]').value.trim(),
+    capacity: Number(row.querySelector('[data-comp-cap]').value) || 0,
+  }));
+}
+function wireBagCompartmentEditor(){
+  const list = byId('mfCompList');
+  const addBtn = byId('mfAddComp');
+  if(!list || !addBtn) return;
+  function refreshDeleteState(){
+    const rows = list.querySelectorAll('.compartment-editor-row');
+    rows.forEach(row=>{
+      const btn = row.querySelector('[data-comp-del]');
+      if(btn) btn.disabled = rows.length <= 1;
+    });
+  }
+  list.addEventListener('click', e=>{
+    const btn = e.target.closest('[data-comp-del]');
+    if(!btn || btn.disabled) return;
+    const rows = list.querySelectorAll('.compartment-editor-row');
+    if(rows.length <= 1) return;
+    btn.closest('.compartment-editor-row').remove();
+    refreshDeleteState();
+  });
+  addBtn.addEventListener('click', ()=>{
+    list.insertAdjacentHTML('beforeend', compartmentRowHtml({id: uid(), name: '', capacity: 4}));
+    refreshDeleteState();
+  });
+  refreshDeleteState();
+  const mode = byId('mfBagMode');
+  if(mode) mode.addEventListener('change', syncCategorySections);
+}
+function createRunesEditor(initialRunes){
+  const wrap = document.createElement('div');
+  let runes = (initialRunes || []).map(rune=>({
+    id: rune.id || uid(),
+    libraryId: rune.libraryId || null,
+    name: rune.name || '',
+    desc: rune.desc || '',
+    traits: (rune.traits || []).slice(),
+    tagEditor: null,
+  }));
+  function snapshot(){
+    runes.forEach(rune=>{
+      if(rune.tagEditor) rune.traits = rune.tagEditor.getTags();
+    });
+  }
+  function render(){
+    snapshot();
+    wrap.innerHTML = '';
+    runes.forEach((rune, index)=>{
+      const card = document.createElement('div');
+      card.className = 'rune-form-card';
+      card.innerHTML = `
+        <div class="field"><label class="field-label">Название руны</label><input type="text" data-rune-name value="${escapeAttr(rune.name)}"></div>
+        <div class="field"><label class="field-label">Дескрипторы</label><div data-rune-tags></div></div>
+        <div class="field"><label class="field-label">Описание</label><textarea data-rune-desc>${escapeHtml_(rune.desc)}</textarea></div>
+        <button type="button" class="btn btn-sm btn-danger" data-rune-del>Снять руну</button>
+      `;
+      rune.tagEditor = createTagEditor(rune.traits);
+      card.querySelector('[data-rune-tags]').appendChild(rune.tagEditor.el);
+      card.querySelector('[data-rune-name]').addEventListener('input', e=>{ rune.name = e.target.value; });
+      card.querySelector('[data-rune-desc]').addEventListener('input', e=>{ rune.desc = e.target.value; });
+      card.querySelector('[data-rune-del]').addEventListener('click', ()=>{
+        snapshot();
+        runes.splice(index, 1);
+        render();
+      });
+      wrap.appendChild(card);
+    });
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'btn btn-sm';
+    add.textContent = '+ Добавить руну';
+    add.addEventListener('click', ()=>{
+      snapshot();
+      runes.push({id: uid(), libraryId: null, name: '', desc: '', traits: [], tagEditor: null});
+      render();
+    });
+    wrap.appendChild(add);
+  }
+  render();
+  return {
+    el: wrap,
+    getRunes: ()=>{
+      snapshot();
+      return runes.map(rune=>({
+        id: rune.id,
+        libraryId: rune.libraryId,
+        name: rune.name.trim() || 'Руна',
+        desc: rune.desc || '',
+        traits: rune.tagEditor ? rune.tagEditor.getTags() : rune.traits,
+      }));
+    },
+  };
+}
+function applyItemForm(target){
+  const category = normalizeCategory(byId('mfCategory').value);
+  const wasBag = isBagItem(target);
+  const oldCompartments = wasBag ? target.bag.compartments.slice() : [];
+  target.name = byId('mfName').value.trim() || 'Без названия';
+  const picked = byId('mfName').dataset.libraryId;
+  if(picked) target.libraryId = picked;
+  target.qty = Math.max(0, Number(byId('mfQty').value) || 0);
+  target.bulk = Number(byId('mfBulk').value) || 0;
+  target.category = category;
+  let location = byId('mfLoc').value;
+  if(category === 'bag' && parseItemLocation(location).type === 'bag') location = 'worn';
+  target.location = location;
+  target.note = byId('mfNote').value;
+  target.desc = byId('mfDesc').value;
+  target.custom = true;
+  target.isCurrency = false;
+  if(category === 'weapon'){
+    target.weapon = {
+      damage: byId('mfWDamage').value, damageType: byId('mfWDamageType').value,
+      group: byId('mfWGroup').value, hands: byId('mfWHands').value,
+      range: byId('mfWRange').value, reload: byId('mfWReload').value, ammo: byId('mfWAmmo').value,
+    };
+  } else target.weapon = null;
+  if(category === 'armor'){
+    target.armor = {
+      ac: byId('mfAAc').value, dexCap: byId('mfADexCap').value, group: byId('mfAGroup').value,
+      armorCategory: byId('mfACat').value, speedPenalty: byId('mfASpeed').value, strength: byId('mfAStr').value,
+    };
+  } else target.armor = null;
+  if(category === 'consumable'){
+    target.consumable = {usage: byId('mfCUsage').value, activation: byId('mfCAct').value};
+  } else target.consumable = null;
+  if(category === 'bag'){
+    const compartments = readCompartmentsFromForm();
+    target.bag = {
+      weightMode: byId('mfBagMode').value === 'fixed' ? 'fixed' : 'contents',
+      ignoreBulk: byId('mfBagMode').value === 'fixed' ? 0 : (Number(byId('mfBagIgnore').value) || 0),
+      compartments: compartments.length ? compartments : [{id: uid(), name: '', capacity: 4}],
+    };
+    if(wasBag){
+      const keep = new Set(target.bag.compartments.map(entry=>entry.id));
+      const dest = bagCompartmentLocation(target.id, target.bag.compartments[0].id);
+      CH.equipment.items.forEach(item=>{
+        if(!String(item.location).startsWith(`bag:${target.id}:`)) return;
+        const compartmentId = String(item.location).split(':')[2];
+        if(!keep.has(compartmentId)) item.location = dest;
+      });
+    }
+  } else {
+    if(wasBag){
+      const dest = fallbackItemLocation(target.id);
+      CH.equipment.items.forEach(item=>{
+        if(String(item.location).startsWith(`bag:${target.id}:`)) item.location = dest;
+      });
+    }
+    target.bag = null;
+  }
+  if(!canHoldRunes(target)) target.runes = [];
+  return target;
+}
+function openItemEditor(opts){
+  const item = opts.item;
+  const isNew = !!opts.isNew;
+  openModal(opts.title, itemFormHtml(item, opts) + `
+    <div class="modal-actions">
+      <button class="btn btn-block" id="mfCancel">Отмена</button>
+      <button class="btn btn-accent btn-block" id="mfSave">${opts.saveLabel}</button>
+    </div>
+  `, ()=>{
+    const tagEditor = createTagEditor(item.traits || []);
+    byId('mfTagsContainer').appendChild(tagEditor.el);
+    const runesEditor = createRunesEditor(item.runes || []);
+    byId('mfRunesContainer').appendChild(runesEditor.el);
+    wireBagCompartmentEditor();
+    byId('mfCategory').addEventListener('change', syncCategorySections);
+    syncCategorySections();
+    if(isNew){
+      const box = byId('mfItemSuggestions');
+      const input = byId('mfName');
+      function renderSuggestions(){
+        const hits = searchLibraryItems(input.value, opts.searchOpts || {});
+        box.innerHTML = '';
+        hits.forEach(entry=>{
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'tag-suggestion';
+          const label = ITEM_CATEGORY_LABELS[normalizeCategory(entry.category)] || '';
+          btn.innerHTML = `<span>${escapeHtml(entry.name)}</span><small>${escapeHtml(label)}</small>`;
+          btn.addEventListener('click', ()=>{
+            const next = instantiateLibraryItem(entry, uid);
+            next.id = item.id;
+            next.qty = Math.max(1, Number(byId('mfQty').value) || 1);
+            next.location = byId('mfLoc').value || item.location;
+            if(next.category === 'bag' && parseItemLocation(next.location).type === 'bag') next.location = 'worn';
+            closeModal();
+            openItemEditor(Object.assign({}, opts, {item: next}));
+          });
+          box.appendChild(btn);
+        });
+      }
+      input.addEventListener('input', renderSuggestions);
+      renderSuggestions();
+    }
+    byId('mfCancel').addEventListener('click', closeModal);
+    byId('mfSave').addEventListener('click', ()=>{
+      applyItemForm(item);
+      item.traits = tagEditor.getTags();
+      item.runes = canHoldRunes(item) ? runesEditor.getRunes() : [];
+      if(isNew && !CH.equipment.items.some(entry=>entry.id === item.id)){
+        CH.equipment.items.push(item);
+      }
+      save();
+      closeModal();
+      renderApp();
+    });
+  });
+}
+function deleteEquipmentItem(id){
+  const item = CH.equipment.items.find(entry=>entry.id === id);
+  if(!item) return;
+  if(isBagItem(item)){
+    const dest = fallbackItemLocation(item.id);
+    CH.equipment.items.forEach(entry=>{
+      if(String(entry.location).startsWith(`bag:${item.id}:`)) entry.location = dest;
+    });
+  }
+  CH.equipment.items = CH.equipment.items.filter(entry=>entry.id !== id);
 }
 
 function wireEquipmentTab(){
   const root = document.querySelector('.page.active');
   wireListItemToggles(root);
-
+  root.querySelectorAll('[data-bag-toggle]').forEach(head=>{
+    head.addEventListener('click', e=>{
+      if(e.target.closest('button, select')) return;
+      const desc = head.parentElement.querySelector('.bag-desc');
+      if(desc) desc.classList.toggle('open');
+    });
+  });
+  root.querySelectorAll('[data-currency]').forEach(inp=>{
+    inp.addEventListener('input', ()=>{
+      const raw = inp.dataset.currency;
+      const split = raw.lastIndexOf('::');
+      setCurrencyQty(raw.slice(0, split), raw.slice(split + 2), inp.value);
+      save();
+      renderApp();
+    });
+  });
   root.querySelectorAll('[data-qty]').forEach(inp=>{
     inp.addEventListener('input', ()=>{
-      const it = CH.equipment.items.find(x=>x.id===inp.dataset.qty);
-      it.qty = Math.max(0, Number(inp.value)||0); save(); renderApp();
+      const item = CH.equipment.items.find(entry=>entry.id === inp.dataset.qty);
+      if(!item) return;
+      item.qty = Math.max(0, Number(inp.value) || 0);
+      save();
+      renderApp();
     });
   });
   root.querySelectorAll('[data-loc]').forEach(sel=>{
     sel.addEventListener('change', ()=>{
-      const it = CH.equipment.items.find(x=>x.id===sel.dataset.loc);
-      it.location = sel.value; save(); renderApp();
+      const item = CH.equipment.items.find(entry=>entry.id === sel.dataset.loc);
+      if(!item) return;
+      let location = sel.value;
+      if(isBagItem(item) && parseItemLocation(location).type === 'bag') location = 'worn';
+      item.location = location;
+      save();
+      renderApp();
     });
   });
   root.querySelectorAll('[data-item-del]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      CH.equipment.items = CH.equipment.items.filter(x=>x.id!==btn.dataset.itemDel);
-      save(); renderApp();
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      deleteEquipmentItem(btn.dataset.itemDel);
+      save();
+      renderApp();
     });
   });
   enableTouchReorder({
@@ -1151,68 +1639,55 @@ function wireEquipmentTab(){
     onReorder: (location, ids) => {
       const ordered = ids.map(id => CH.equipment.items.find(item => item.id === id));
       let position = 0;
-      CH.equipment.items = CH.equipment.items.map(item => item.location === location && !item.isCurrency ? ordered[position++] : item);
-      save(); renderApp();
+      CH.equipment.items = CH.equipment.items.map(item =>
+        item.location === location && !item.isCurrency && !isBagItem(item) ? ordered[position++] : item
+      );
+      save();
+      renderApp();
     },
   });
   root.querySelectorAll('[data-item-edit]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const it = CH.equipment.items.find(x=>x.id===btn.dataset.itemEdit);
-      openModal('Изменить предмет', itemFormHtml(it) + `
-        <div class="modal-actions">
-          <button class="btn btn-block" id="mfCancel">Отмена</button>
-          <button class="btn btn-accent btn-block" id="mfSave">Сохранить</button>
-        </div>
-      `, (m)=>{
-        const tagEditor = createTagEditor(it.traits||[]);
-        byId('mfTagsContainer').appendChild(tagEditor.el);
-        byId('mfCancel').addEventListener('click', closeModal);
-        byId('mfSave').addEventListener('click', ()=>{
-          it.name = byId('mfName').value || it.name;
-          it.qty = Number(byId('mfQty').value)||0;
-          it.bulk = Number(byId('mfBulk').value)||0;
-          it.location = byId('mfLoc').value;
-          it.note = byId('mfNote').value;
-          it.desc = byId('mfDesc').value;
-          it.traits = tagEditor.getTags();
-          save(); closeModal(); renderApp();
-        });
-      });
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      const item = CH.equipment.items.find(entry=>entry.id === btn.dataset.itemEdit);
+      if(!item) return;
+      openItemEditor({title: 'Изменить предмет', item, saveLabel: 'Сохранить', isNew: false, lockCategory: false});
     });
   });
   root.querySelectorAll('[data-storage-del]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const sid = btn.dataset.storageDel;
-      CH.equipment.storages = CH.equipment.storages.filter(x=>x.id!==sid);
-      CH.equipment.items.forEach(i=>{ if(i.location===sid) i.location='carried'; });
-      save(); renderApp();
-    });
-  });
-
-  byId('addItemBtn').addEventListener('click', ()=>{
-    openModal('Новый предмет', itemFormHtml() + `
-      <div class="modal-actions">
-        <button class="btn btn-block" id="mfCancel">Отмена</button>
-        <button class="btn btn-accent btn-block" id="mfSave">Добавить</button>
-      </div>
-    `, ()=>{
-      const tagEditor = createTagEditor([]);
-      byId('mfTagsContainer').appendChild(tagEditor.el);
-      byId('mfCancel').addEventListener('click', closeModal);
-      byId('mfSave').addEventListener('click', ()=>{
-        CH.equipment.items.push({
-          id:uid(), name:byId('mfName').value||'Без названия', qty:Number(byId('mfQty').value)||0,
-          bulk:Number(byId('mfBulk').value)||0, location:byId('mfLoc').value, note:byId('mfNote').value,
-          desc: byId('mfDesc').value, isCurrency:false, custom:true, traits: tagEditor.getTags()
-        });
-        save(); closeModal(); renderApp();
+      const dest = fallbackItemLocation();
+      CH.equipment.storages = CH.equipment.storages.filter(entry=>entry.id !== sid);
+      CH.equipment.items.forEach(item=>{
+        if(item.location === sid) item.location = isBagItem(item) ? 'worn' : dest;
       });
+      save();
+      renderApp();
     });
   });
-
+  function startNewItem(location, bagOnly){
+    const item = emptyCustomItem(bagOnly ? 'bag' : 'other', uid);
+    item.location = location || (bagOnly ? 'worn' : fallbackItemLocation());
+    if(bagOnly && parseItemLocation(item.location).type === 'bag') item.location = 'worn';
+    openItemEditor({
+      title: bagOnly ? 'Новая сумка' : 'Новый предмет',
+      item,
+      saveLabel: 'Добавить',
+      isNew: true,
+      lockCategory: bagOnly,
+      bagOnly,
+      searchOpts: bagOnly ? {category: 'bag'} : {excludeCategory: 'bag'},
+    });
+  }
+  root.querySelectorAll('[data-add-item-loc]').forEach(btn=>{
+    btn.addEventListener('click', ()=>startNewItem(btn.dataset.addItemLoc, false));
+  });
+  byId('addItemBtn').addEventListener('click', ()=>startNewItem(fallbackItemLocation(), false));
+  byId('addBagBtn').addEventListener('click', ()=>startNewItem('worn', true));
   byId('addStorageBtn').addEventListener('click', ()=>{
-    openModal('Новый раздел хранения', `
-      <div class="field"><label class="field-label">Название (напр. «Дом», «Банк»)</label><input type="text" id="mfStorageName"></div>
+    openModal('Новое хранилище', `
+      <div class="field"><label class="field-label">Название (дом, банк…)</label><input type="text" id="mfStorageName"></div>
       <div class="modal-actions">
         <button class="btn btn-block" id="mfCancel">Отмена</button>
         <button class="btn btn-accent btn-block" id="mfSave">Создать</button>
@@ -1222,8 +1697,10 @@ function wireEquipmentTab(){
       byId('mfSave').addEventListener('click', ()=>{
         const name = byId('mfStorageName').value.trim();
         if(!name) return;
-        CH.equipment.storages.push({id:uid(), name});
-        save(); closeModal(); renderApp();
+        CH.equipment.storages.push({id: uid(), name});
+        save();
+        closeModal();
+        renderApp();
       });
     });
   });

@@ -24,7 +24,7 @@ body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   font-size:15px;
   line-height:1.4;
-  padding-bottom:calc(var(--nav-h) + 14px);
+  padding-bottom:calc(var(--nav-h) + 28px);
   min-height:100vh;
 }
 h1,h2,h3,h4{margin:0;font-weight:600;}
@@ -299,6 +299,40 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 .weight-summary{display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:13px;}
 .weight-bar{height:7px;border-radius:4px;background:var(--surface3);overflow:hidden;margin-top:6px;}
 .weight-bar-fill{height:100%;background:var(--accent);}
+.weight-bar-fill.over{background:#c45c5c;}
+.currency-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 12px;}
+.currency-cell{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-dim);}
+.currency-cell input{padding:6px 8px;}
+.bag-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;}
+.bag-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.bag-card-head .n{font-size:14.5px;font-weight:600;}
+.bag-card-head .meta{font-size:11px;color:var(--text-dim);margin-top:2px;}
+.bag-card-actions{display:flex;gap:4px;flex-shrink:0;align-items:center;}
+.bag-card-actions .locsel{width:108px;font-size:11.5px;padding:5px 4px;}
+.compartment-block{margin-top:10px;padding-top:8px;border-top:1px solid var(--border);}
+.compartment-title{font-size:12px;color:var(--text-dim);margin-bottom:2px;}
+.item-stat-line{font-size:12px;color:var(--text-dim);margin-top:4px;}
+.rune-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+.form-section{margin-top:12px;padding-top:10px;border-top:1px solid var(--border);}
+.form-section h4{font-size:13px;margin-bottom:8px;}
+.compartment-editor-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+.compartment-editor-row input[data-comp-name]{flex:1;}
+.compartment-editor-row input[data-comp-cap]{width:72px;}
+.rune-form-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-top:8px;}
+.eq-toolbar{display:flex;flex-direction:column;gap:8px;margin:4px 0 8px;}
+.location-add{margin-top:8px;}
+.comp-over{color:#e08579;font-size:12px;}
+.hint-line{font-size:11px;color:var(--text-faint);margin-top:4px;line-height:1.4;}
+.list-item-head .n,.bag-card-head .n{font-size:14.5px;font-weight:600;}
+.list-item-head .meta{font-size:11px;color:var(--text-dim);margin-top:2px;}
+.bag-desc{font-size:12.5px;color:var(--text-dim);margin-top:8px;display:none;}
+.bag-desc.open{display:block;}
+.bag-card .list-item{background:var(--surface);}
+.rune-chip{display:inline-block;background:var(--accent-soft);border:1px solid #5a4526;color:var(--accent);border-radius:100px;padding:2px 9px;font-size:10.5px;}
+.compartment-editor-row .skill-del:disabled{opacity:.25;cursor:not-allowed;}
+.currency-cell{cursor:pointer;}
+.currency-cell input{cursor:text;}
+
 
 /* spells */
 .slot-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
