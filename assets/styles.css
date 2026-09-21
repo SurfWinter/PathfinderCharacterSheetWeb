@@ -180,9 +180,9 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 .tag-chip-box{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;}
 .tag-chip{
   display:inline-flex;align-items:center;gap:6px;background:var(--surface3);border:1px solid var(--border);
-  border-radius:100px;padding:4px 6px 4px 11px;font-size:12px;color:var(--text);
+  border-radius:100px;padding:3px 11px 5px;font-size:12px;color:var(--text);
 }
-.tag-chip button{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:11px;padding:2px;line-height:1;}
+.tag-chip button{background:none;border:none;color:var(--text-faint);cursor:pointer;font-size:11px;padding:2px;line-height:1;margin:2px -5px 0 0;}
 .tag-input-row{display:flex;gap:6px;}
 .tag-input-row input{flex:1;}
 .tag-suggestions{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
@@ -329,6 +329,8 @@ input[type=checkbox]:disabled{opacity:.4;cursor:not-allowed;}
 .bag-desc.open{display:block;}
 .bag-card .list-item{background:var(--surface);}
 .rune-chip{display:inline-block;background:var(--accent-soft);border:1px solid #5a4526;color:var(--accent);border-radius:100px;padding:2px 9px;font-size:10.5px;}
+.rune-desc-block{margin-top:10px;padding-top:8px;border-top:1px solid var(--border);}
+.rune-desc-name{color:var(--accent);font-weight:600;font-size:12.5px;margin-bottom:4px;}
 .compartment-editor-row .skill-del:disabled{opacity:.25;cursor:not-allowed;}
 .currency-cell{cursor:pointer;}
 .currency-cell input{cursor:text;}

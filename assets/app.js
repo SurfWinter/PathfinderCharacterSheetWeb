@@ -3,6 +3,7 @@ import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
 import { TRAIT_LIBRARY, getLibraryTrait } from './libraries/traits.js';
+import { instantiateLibraryRune, searchLibraryRunes } from './libraries/runes.js';
 import {
   ITEM_CATEGORY_LABELS,
   bagCompartmentLocation, bagEffectiveBulk, canHoldRunes, compartmentContentsBulk,
@@ -1101,6 +1102,16 @@ function runesHtml(item){
   if(!item.runes || !item.runes.length) return '';
   return `<div class="rune-list">${item.runes.map(rune=>`<span class="rune-chip">${escapeHtml(rune.name || 'Руна')}</span>`).join('')}</div>`;
 }
+function itemDescriptionHtml(item){
+  const blocks = [];
+  if(item.desc) blocks.push(`<div>${escapeHtml(item.desc)}</div>`);
+  (item.runes || []).forEach(rune=>{
+    const name = escapeHtml(rune.name || 'Руна');
+    const desc = rune.desc ? `<div>${escapeHtml(rune.desc)}</div>` : '';
+    blocks.push(`<div class="rune-desc-block"><div class="rune-desc-name">${name}</div>${desc}</div>`);
+  });
+  return blocks.length ? blocks.join('') : 'Нет описания';
+}
 function regularItemsAt(location){
   return CH.equipment.items.filter(item=>!item.isCurrency && !isBagItem(item) && item.location === location);
 }
@@ -1126,7 +1137,7 @@ function itemRowHtml(item){
         <button class="skill-del" data-item-edit="${item.id}" title="Изменить">✎</button>
         ${item.custom !== false ? `<button class="skill-del" data-item-del="${item.id}" title="Удалить">✕</button>` : '<span style="width:18px;display:inline-block"></span>'}
       </div>
-      <div class="list-item-body">${item.desc ? escapeHtml(item.desc) : 'Нет описания'}</div>
+      <div class="list-item-body">${itemDescriptionHtml(item)}</div>
     </div>`;
 }
 function bagCardHtml(bag){
@@ -1392,7 +1403,7 @@ function wireBagCompartmentEditor(){
   const mode = byId('mfBagMode');
   if(mode) mode.addEventListener('change', syncCategorySections);
 }
-function createRunesEditor(initialRunes){
+function createRunesEditor(initialRunes, opts={}){
   const wrap = document.createElement('div');
   let runes = (initialRunes || []).map(rune=>({
     id: rune.id || uid(),
@@ -1407,6 +1418,9 @@ function createRunesEditor(initialRunes){
       if(rune.tagEditor) rune.traits = rune.tagEditor.getTags();
     });
   }
+  function currentSlot(){
+    return opts.getSlot ? opts.getSlot() : '';
+  }
   function render(){
     snapshot();
     wrap.innerHTML = '';
@@ -1414,14 +1428,42 @@ function createRunesEditor(initialRunes){
       const card = document.createElement('div');
       card.className = 'rune-form-card';
       card.innerHTML = `
-        <div class="field"><label class="field-label">Название руны</label><input type="text" data-rune-name value="${escapeAttr(rune.name)}"></div>
+        <div class="field"><label class="field-label">Название руны</label>
+          <input type="text" data-rune-name value="${escapeAttr(rune.name)}" autocomplete="off">
+          <div data-rune-suggestions class="tag-suggestions"></div>
+          <div class="hint-line">Начните вводить название — появятся руны из библиотеки</div>
+        </div>
         <div class="field"><label class="field-label">Дескрипторы</label><div data-rune-tags></div></div>
         <div class="field"><label class="field-label">Описание</label><textarea data-rune-desc>${escapeHtml_(rune.desc)}</textarea></div>
         <button type="button" class="btn btn-sm btn-danger" data-rune-del>Снять руну</button>
       `;
       rune.tagEditor = createTagEditor(rune.traits);
       card.querySelector('[data-rune-tags]').appendChild(rune.tagEditor.el);
-      card.querySelector('[data-rune-name]').addEventListener('input', e=>{ rune.name = e.target.value; });
+      const nameInput = card.querySelector('[data-rune-name]');
+      const box = card.querySelector('[data-rune-suggestions]');
+      function renderSuggestions(){
+        const hits = searchLibraryRunes(nameInput.value, {slot: currentSlot()});
+        box.innerHTML = '';
+        hits.forEach(entry=>{
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'tag-suggestion';
+          btn.innerHTML = `<span>${escapeHtml(entry.name)}</span>`;
+          btn.addEventListener('click', ()=>{
+            snapshot();
+            const next = instantiateLibraryRune(entry, uid);
+            next.id = rune.id;
+            runes[index] = Object.assign(next, {tagEditor: null});
+            render();
+          });
+          box.appendChild(btn);
+        });
+      }
+      nameInput.addEventListener('input', e=>{
+        rune.name = e.target.value;
+        rune.libraryId = rune.libraryId || null;
+        renderSuggestions();
+      });
       card.querySelector('[data-rune-desc]').addEventListener('input', e=>{ rune.desc = e.target.value; });
       card.querySelector('[data-rune-del]').addEventListener('click', ()=>{
         snapshot();
@@ -1429,6 +1471,7 @@ function createRunesEditor(initialRunes){
         render();
       });
       wrap.appendChild(card);
+      renderSuggestions();
     });
     const add = document.createElement('button');
     add.type = 'button';
@@ -1444,6 +1487,7 @@ function createRunesEditor(initialRunes){
   render();
   return {
     el: wrap,
+    refresh: render,
     getRunes: ()=>{
       snapshot();
       return runes.map(rune=>({
@@ -1528,10 +1572,15 @@ function openItemEditor(opts){
   `, ()=>{
     const tagEditor = createTagEditor(item.traits || []);
     byId('mfTagsContainer').appendChild(tagEditor.el);
-    const runesEditor = createRunesEditor(item.runes || []);
+    const runesEditor = createRunesEditor(item.runes || [], {
+      getSlot: () => normalizeCategory(byId('mfCategory').value),
+    });
     byId('mfRunesContainer').appendChild(runesEditor.el);
     wireBagCompartmentEditor();
-    byId('mfCategory').addEventListener('change', syncCategorySections);
+    byId('mfCategory').addEventListener('change', ()=>{
+      syncCategorySections();
+      runesEditor.refresh();
+    });
     syncCategorySections();
     if(isNew){
       const box = byId('mfItemSuggestions');
