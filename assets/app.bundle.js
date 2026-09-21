@@ -352,7 +352,7 @@ function wornCarriedBulk(items){
 
 /* libraries/traits.js */
 // Библиотека дескрипторов. Допустимые цвета:
-// default, red, green, blue, purple, deepBlue, gold, deepPink, silver.
+// default, red, green, blue, purple, deepBlue, gold, deepPink, silver, void.
 // Добавляйте новые записи сюда; id должен быть уникальным и неизменяемым.
 const TRAIT_LIBRARY = [
   { id:'fire', name:'Огонь', color:'red', category:'Энергия' },
@@ -433,6 +433,56 @@ const TRAIT_LIBRARY = [
   { id:'trip', name:'Сбивающее', color:'silver', category:'Оружие' },
   { id:'backstabber', name:'Подлое', color:'green', category:'Оружие' },
   { id:'joustingD6', name:'Кавалерийское D6', color:'silver', category:'Оружие' },
+
+  // Магия
+  { id:'arcane', name:'Мистическая', color:'purple', category:'Магия' },
+  { id:'divine', name:'Сакральная', color:'gold', category:'Магия' },
+  { id:'occult', name:'Оккультная', color:'deepBlue', category:'Магия' },
+  { id:'primal', name:'Первобытная', color:'green', category:'Магия' },
+  { id:'cantrip', name:'Фокус', color:'purple', category:'Магия' },
+  { id:'focus', name:'Фокальное', color:'gold', category:'Магия' },
+  { id:'illusion', name:'Иллюзия', color:'purple', category:'Магия' },
+  { id:'summon', name:'Призыв', color:'deepBlue', category:'Магия' },
+
+  // Разное (доп.)
+  { id:'subtle', name:'Незаметное', color:'silver', category:'Разное' },
+  { id:'detection', name:'Обнаружение', color:'blue', category:'Разное' },
+
+  // Общее (доп.)
+  { id:'visual', name:'Зрение', color:'default', category:'Общее' },
+  { id:'auditory', name:'Слух', color:'default', category:'Общее' },
+  { id:'secret', name:'Тайна', color:'default', category:'Общее' },
+  { id:'exploration', name:'Исследование', color:'default', category:'Общее' },
+  { id:'linguistic', name:'Язык', color:'default', category:'Общее' },
+
+  // Энергия (доп.)
+  { id:'air', name:'Воздух', color:'blue', category:'Энергия' },
+  { id:'force', name:'Сила', color:'purple', category:'Энергия' },
+  { id:'light', name:'Свет', color:'gold', category:'Энергия' },
+  { id:'mental', name:'Ментальный', color:'purple', category:'Энергия' },
+  { id:'void', name:'Пустота', color:'void', category:'Энергия' },
+
+  // Эффект (доп.)
+  { id:'emotion', name:'Эмоции', color:'deepPink', category:'Эффект' },
+  { id:'fear', name:'Ужас', color:'void', category:'Эффект' },
+  { id:'incapacitation', name:'Устранение', color:'void', category:'Эффект' },
+  { id:'sleep', name:'Сон', color:'deepBlue', category:'Эффект' },
+  { id:'death', name:'Смерть', color:'void', category:'Эффект' },
+
+  // Персонаж (доп.)
+  { id:'wizard', name:'Волшебник', color:'purple', category:'Персонаж' },
+  { id:'ancestry', name:'Родословная', color:'silver', category:'Персонаж' },
+  { id:'general', name:'Общая', color:'silver', category:'Персонаж' },
+  { id:'skillFeat', name:'Навык', color:'silver', category:'Персонаж' },
+
+  // Грех
+  { id:'lust', name:'Похоть', color:'deepPink', category:'Грех' },
+  { id:'envy', name:'Зависть', color:'green', category:'Грех' },
+  { id:'gluttony', name:'Чревоугодие', color:'red', category:'Грех' },
+  { id:'sloth', name:'Лень', color:'deepBlue', category:'Грех' },
+  { id:'pride', name:'Гордыня', color:'void', category:'Грех' },
+  { id:'wrath', name:'Гнев', color:'red', category:'Грех' },
+  { id:'greed', name:'Алчность', color:'gold', category:'Грех' },
 ];
 
 const traitsById = new Map(TRAIT_LIBRARY.map(trait => [trait.id, trait]));
@@ -2215,7 +2265,7 @@ function wireCharacterTab(){
   function renderCharacterTraitSuggestions(){
     if(!traitSuggestionsEl || !traitInputEl) return;
     const query = traitInputEl.value.trim().toLocaleLowerCase('ru');
-    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,6) : [];
+    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,12) : [];
     traitSuggestionsEl.innerHTML = '';
     matches.forEach(trait=>{
       const option = document.createElement('button');
@@ -2557,7 +2607,7 @@ function createTagEditor(initialTags){
   }
   function renderSuggestions(){
     const query = input.value.trim().toLocaleLowerCase('ru');
-    const matches = query ? TRAIT_LIBRARY.filter(t => t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0, 6) : [];
+    const matches = query ? TRAIT_LIBRARY.filter(t => t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0, 12) : [];
     suggestions.innerHTML = '';
     matches.forEach(trait=>{
       const option = document.createElement('button');
@@ -4404,7 +4454,7 @@ function wireFamiliarTab(){
   function renderFamTraitSuggestions(){
     if(!traitSuggestionsEl || !traitInputEl) return;
     const query = traitInputEl.value.trim().toLocaleLowerCase('ru');
-    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,6) : [];
+    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,12) : [];
     traitSuggestionsEl.innerHTML = '';
     matches.forEach(trait=>{
       const option = document.createElement('button');

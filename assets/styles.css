@@ -269,6 +269,7 @@ body.settings-open .toast{bottom:28px;}
 .tag-chip.tone-gold,.item-traits .tg.tone-gold,.tag-suggestion.tone-gold{border-color:#6c5624;background:#332916;color:#e8ca75;}
 .tag-chip.tone-deepPink,.item-traits .tg.tone-deepPink,.tag-suggestion.tone-deepPink{border-color:#753b61;background:#391c31;color:#ef9bce;}
 .tag-chip.tone-silver,.item-traits .tg.tone-silver,.tag-suggestion.tone-silver{border-color:#64707c;background:#2a3037;color:#c8d0d8;}
+.tag-chip.tone-void,.item-traits .tg.tone-void,.tag-suggestion.tone-void{border-color:#3a3544;background:#16141c;color:#b7b0c4;}
 
 .hp-row{display:flex;align-items:stretch;gap:10px;}
 .extra-speed-row{

@@ -617,7 +617,7 @@ function wireCharacterTab(){
   function renderCharacterTraitSuggestions(){
     if(!traitSuggestionsEl || !traitInputEl) return;
     const query = traitInputEl.value.trim().toLocaleLowerCase('ru');
-    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,6) : [];
+    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,12) : [];
     traitSuggestionsEl.innerHTML = '';
     matches.forEach(trait=>{
       const option = document.createElement('button');
@@ -959,7 +959,7 @@ function createTagEditor(initialTags){
   }
   function renderSuggestions(){
     const query = input.value.trim().toLocaleLowerCase('ru');
-    const matches = query ? TRAIT_LIBRARY.filter(t => t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0, 6) : [];
+    const matches = query ? TRAIT_LIBRARY.filter(t => t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0, 12) : [];
     suggestions.innerHTML = '';
     matches.forEach(trait=>{
       const option = document.createElement('button');
@@ -2806,7 +2806,7 @@ function wireFamiliarTab(){
   function renderFamTraitSuggestions(){
     if(!traitSuggestionsEl || !traitInputEl) return;
     const query = traitInputEl.value.trim().toLocaleLowerCase('ru');
-    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,6) : [];
+    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,12) : [];
     traitSuggestionsEl.innerHTML = '';
     matches.forEach(trait=>{
       const option = document.createElement('button');
