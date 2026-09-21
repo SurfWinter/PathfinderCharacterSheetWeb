@@ -72,6 +72,8 @@ export const TRAIT_LIBRARY = [
   { id:'parry', name:'Парирующее', color:'silver', category:'Оружие' },
   { id:'deadlyD6', name:'Смертоносное D6', color:'red', category:'Оружие' },
   { id:'deadlyD8', name:'Смертоносное D8', color:'red', category:'Оружие' },
+  { id:'deadlyD10', name:'Смертоносное D10', color:'red', category:'Оружие' },
+  { id:'volley30', name:'Залповое 30 фт', color:'silver', category:'Оружие' },
   { id:'sweep', name:'Размашистое', color:'silver', category:'Оружие' },
   { id:'fatalD8', name:'Добивающее D8', color:'red', category:'Оружие' },
   { id:'combination', name:'Комбинированное', color:'blue', category:'Оружие' },

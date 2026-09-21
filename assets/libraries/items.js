@@ -114,7 +114,8 @@ export const ITEM_LIBRARY = [
     category: 'weapon',
     bulk: 2,
     traits: [
-      { type: 'library', id: 'versatileP' },
+      { type: 'library', id: 'volley30' },
+      { type: 'library', id: 'deadlyD10' },
     ],
     desc: 'Длинный лук выше большинства людей и при стрельбе упирается одним концом в землю. Он стреляет на большую дистанцию, но неудобен в тесноте.',
     weapon: {
