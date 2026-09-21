@@ -426,7 +426,7 @@ function renderCharacterTab(){
         <div class="card-body ${CH.aboutCollapsed?'collapsed':''}">
           <div class="desc-grid">
             <div class="field"><label class="field-label">Родословная</label>${isPlay() ? `<div class="play-text">${escapeHtml(CH.descriptors.ancestry) || '—'}</div>` : `<input type="text" id="descAncestry" value="${escapeAttr(CH.descriptors.ancestry)}">`}</div>
-            <div class="field"><label class="field-label">Наследие</label>${isPlay() ? `<div class="play-text">${escapeHtml(CH.descriptors.heritage) || '—'}</div>` : `<input type="text" id="descHeritage" value="${escapeAttr(CH.descriptors.heritage)}">`}</div>
+            <div class="field"><label class="field-label">Родина</label>${isPlay() ? `<div class="play-text">${escapeHtml(CH.descriptors.heritage) || '—'}</div>` : `<input type="text" id="descHeritage" value="${escapeAttr(CH.descriptors.heritage)}">`}</div>
             <div class="field"><label class="field-label">Предыстория</label>${isPlay() ? `<div class="play-text">${escapeHtml(CH.descriptors.background) || '—'}</div>` : `<input type="text" id="descBackground" value="${escapeAttr(CH.descriptors.background)}">`}</div>
             <div class="field"><label class="field-label">Мировоззрение</label>${isPlay() ? `<div class="play-text">${escapeHtml(CH.descriptors.alignment) || '—'}</div>` : `<input type="text" id="descAlignment" value="${escapeAttr(CH.descriptors.alignment)}">`}</div>
             <div class="field"><label class="field-label">Божество</label>${isPlay() ? `<div class="play-text">${escapeHtml(CH.descriptors.deity) || '—'}</div>` : `<input type="text" id="descDeity" value="${escapeAttr(CH.descriptors.deity)}">`}</div>
