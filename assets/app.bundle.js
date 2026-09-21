@@ -2172,14 +2172,11 @@ function renderCharacterTab(){
         </div>
         ${CH.hpCollapsed ? `
         <div class="compact-panel compact-hp">
-          <div class="compact-hp-row">
-            <button class="btn hp-delta hp-minus" data-delta="-1">−1</button>
-            <div class="compact-hp-value">
-              <span class="hp-num">${CH.hp.current}</span><span class="hp-max"> / ${CH.hp.max}</span>
-              ${CH.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${CH.hp.temp} врем.</span>`:''}
-            </div>
-            <button class="btn hp-delta hp-plus" data-delta="1">+1</button>
+          <div class="compact-hp-value">
+            <span class="hp-num">${CH.hp.current}</span><span class="hp-max"> / ${CH.hp.max}</span>
+            ${CH.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${CH.hp.temp} врем.</span>`:''}
           </div>
+          ${hpDeltaBtnsHtml('char')}
           <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
         </div>` : ''}
         <div class="card-body ${CH.hpCollapsed?'collapsed':''}">
@@ -2188,12 +2185,7 @@ function renderCharacterTab(){
             ${CH.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${CH.hp.temp} врем.</span>`:''}
           </div>
           <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
-          <div class="hp-btns">
-            <button class="btn hp-delta hp-minus" data-delta="-5">−5</button>
-            <button class="btn hp-delta hp-minus" data-delta="-1">−1</button>
-            <button class="btn hp-delta hp-plus" data-delta="1">+1</button>
-            <button class="btn hp-delta hp-plus" data-delta="5">+5</button>
-          </div>
+          ${hpDeltaBtnsHtml('char')}
           <div class="row2" style="margin-top:10px;">
             <div class="field" style="margin-bottom:0;"><label class="field-label">Текущие ОЗ</label><input type="number" id="hpCurrentInput" value="${CH.hp.current}"></div>
             ${isPlay() ? `
@@ -2462,6 +2454,10 @@ function wireCharacterTab(){
   root.querySelectorAll('.hp-delta').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       e.stopPropagation();
+      if(btn.hasAttribute('data-hp-fill')){
+        applyHpFill();
+        return;
+      }
       applyHpDelta(Number(btn.dataset.delta));
     });
   });
@@ -2654,6 +2650,18 @@ function applyAbilityFlaw(id){
   st.partial = false;
   save(); renderApp();
 }
+function hpDeltaBtnsHtml(kind){
+  const attr = kind === 'fam' ? 'data-fam-delta' : 'data-delta';
+  const fill = kind === 'fam' ? 'data-fam-hp-fill' : 'data-hp-fill';
+  return `<div class="hp-btns">
+    <button class="btn hp-delta hp-minus" ${attr}="-25">−25</button>
+    <button class="btn hp-delta hp-minus" ${attr}="-5">−5</button>
+    <button class="btn hp-delta hp-minus" ${attr}="-1">−1</button>
+    <button class="btn hp-delta hp-plus" ${attr}="1">+1</button>
+    <button class="btn hp-delta hp-plus" ${attr}="5">+5</button>
+    <button class="btn hp-delta hp-plus hp-max" ${fill}>max</button>
+  </div>`;
+}
 function applyHpDelta(d){
   if(d < 0){
     let dmg = -d;
@@ -2668,6 +2676,12 @@ function applyHpDelta(d){
   const sign = d < 0 ? String(d) : ('+' + d);
   showToast('ПЗ ' + sign + ' → ' + CH.hp.current, d < 0 ? 'bad' : 'good');
   queueFlash('.hp-num', d < 0 ? 'bad' : 'good');
+  save(); renderApp();
+}
+function applyHpFill(){
+  CH.hp.current = CH.hp.max;
+  showToast('ПЗ → макс. ' + CH.hp.current, 'good');
+  queueFlash('.hp-num', 'good');
   save(); renderApp();
 }
 function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
@@ -4439,14 +4453,11 @@ function renderFamiliarTab(){
         </div>
         ${F.hpCollapsed ? `
         <div class="compact-panel compact-hp">
-          <div class="compact-hp-row">
-            <button class="btn hp-delta hp-minus" data-fam-delta="-1">−1</button>
-            <div class="compact-hp-value">
-              <span class="hp-num">${hpCur}</span><span class="hp-max"> / ${hpMax}</span>
-              ${F.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${F.hp.temp} врем.</span>`:''}
-            </div>
-            <button class="btn hp-delta hp-plus" data-fam-delta="1">+1</button>
+          <div class="compact-hp-value">
+            <span class="hp-num">${hpCur}</span><span class="hp-max"> / ${hpMax}</span>
+            ${F.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${F.hp.temp} врем.</span>`:''}
           </div>
+          ${hpDeltaBtnsHtml('fam')}
           <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
           ${d.resistances.types.length ? `<div class="tag-chip-box" style="margin-top:8px;margin-bottom:0;">${d.resistances.types.map(t=>`<span class="tag-chip resist">Устойчивость к ${escapeHtml(t)} ${d.resistances.value}</span>`).join('')}</div>` : ''}
         </div>` : ''}
@@ -4456,12 +4467,7 @@ function renderFamiliarTab(){
             ${F.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${F.hp.temp} врем.</span>`:''}
           </div>
           <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
-          <div class="hp-btns">
-            <button class="btn hp-delta hp-minus" data-fam-delta="-5">−5</button>
-            <button class="btn hp-delta hp-minus" data-fam-delta="-1">−1</button>
-            <button class="btn hp-delta hp-plus" data-fam-delta="1">+1</button>
-            <button class="btn hp-delta hp-plus" data-fam-delta="5">+5</button>
-          </div>
+          ${hpDeltaBtnsHtml('fam')}
           <div class="row2" style="margin-top:10px;">
             <div class="field" style="margin-bottom:0;"><label class="field-label">Текущие ОЗ</label><input type="number" id="famHpCurrent" value="${hpCur}"></div>
             <div class="field" style="margin-bottom:0;"><label class="field-label">Максимум ОЗ</label><input type="number" value="${hpMax}" disabled></div>
@@ -4763,6 +4769,12 @@ function wireFamiliarTab(){
       applyFamiliarHpDelta(Number(btn.dataset.famDelta));
     });
   });
+  root.querySelectorAll('[data-fam-hp-fill]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      applyFamiliarHpFill();
+    });
+  });
   const hpCur = byId('famHpCurrent');
   if(hpCur) hpCur.addEventListener('input', e=>{ F.hp.current = clamp(Number(e.target.value)||0, 0, d.hpMax); save(); renderApp(); });
   const hpTemp = byId('famHpTemp');
@@ -4923,6 +4935,14 @@ function applyFamiliarHpDelta(delta){
   const sign = delta < 0 ? String(delta) : ('+' + delta);
   showToast('ПЗ фамильяра ' + sign + ' → ' + F.hp.current, delta < 0 ? 'bad' : 'good');
   queueFlash('.hp-num', delta < 0 ? 'bad' : 'good');
+  save(); renderApp();
+}
+function applyFamiliarHpFill(){
+  const F = CH.familiar;
+  const max = familiarDerived().hpMax;
+  F.hp.current = max;
+  showToast('ПЗ фамильяра → макс. ' + F.hp.current, 'good');
+  queueFlash('.hp-num', 'good');
   save(); renderApp();
 }
 

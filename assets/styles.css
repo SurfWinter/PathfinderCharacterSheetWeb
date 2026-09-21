@@ -98,11 +98,15 @@ button:disabled:active{transform:none;}
   width:44px;min-width:44px;height:44px;padding:0;font-size:15px;font-weight:700;flex-shrink:0;
   border-radius:50%;
 }
-.compact-hp-value{flex:1;text-align:center;min-width:0;}
+.compact-hp-value{text-align:center;min-width:0;}
 .compact-hp-value .hp-num{font-size:28px;font-weight:700;}
+.compact-hp .hp-btns{margin-top:8px;}
 .compact-hp .hp-bar{margin-top:8px;}
 .hp-delta.hp-minus{background:var(--danger-soft);border-color:#5c2f28;color:#e08579;}
 .hp-delta.hp-plus{background:#233a2b;border-color:#2f5a3c;color:#7cbf8c;}
+.hp-delta.hp-max{
+  width:auto;min-width:44px;padding:0 10px;border-radius:22px;font-size:12px;letter-spacing:.02em;
+}
 .compact-speeds{display:flex;gap:6px;flex-wrap:wrap;}
 .compact-speeds .compact-stat{flex:1 1 76px;min-width:76px;max-width:112px;}
 .compact-speeds .compact-stat .k{text-align:center;}
@@ -283,10 +287,11 @@ body.settings-open .toast{bottom:28px;}
   font-variant-numeric: tabular-nums;
 }
 .hp-max{color:var(--text-dim);font-size:16px;}
-.hp-btns{display:flex;gap:8px;justify-content:center;margin-top:8px;flex-wrap:wrap;}
+.hp-btns{display:flex;gap:6px;justify-content:center;margin-top:8px;flex-wrap:wrap;}
 .hp-btns .hp-delta{
-  width:44px;min-width:44px;height:44px;padding:0;border-radius:50%;font-size:14px;font-weight:700;
+  width:44px;min-width:44px;height:44px;padding:0;border-radius:50%;font-size:13px;font-weight:700;
 }
+.hp-btns .hp-delta.hp-max{width:auto;min-width:48px;padding:0 10px;border-radius:22px;font-size:12px;}
 .hp-bar{height:8px;border-radius:5px;background:var(--surface3);overflow:hidden;margin-top:10px;position:relative;}
 .hp-bar-fill{height:100%;background:var(--good);transition:width .2s;}
 .hp-bar-temp{position:absolute;top:0;left:0;height:100%;background:#5b7fa6;opacity:.55;}
