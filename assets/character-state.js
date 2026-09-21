@@ -1,5 +1,5 @@
 // Состояние персонажа, миграции и локальное хранилище.
-import { bagCompartmentLocation, getLibraryItem, instantiateLibraryItem, isBagItem, normalizeBagData, normalizeCategory } from './libraries/items.js';
+import { bagCompartmentLocation, getLibraryItem, instantiateLibraryItem, isBagItem, normalizeArmorData, normalizeBagData, normalizeCategory, normalizeShieldData, normalizeWeaponData } from './libraries/items.js';
 import { matchLibraryTrait } from './libraries/traits.js';
 
 const STORAGE_KEY = 'pf2_character_v1'; // прежний ключ: используется только для миграции
@@ -42,6 +42,7 @@ const BASIC_ACTIONS = [
   {name:'Поиск', type:'Одно действие', traits:'Концентрация, Тайна', desc:'Вы изучаете область, стараясь отыскать существ или объекты (включая потайные двери и опасности). Выберите область, в которой собираетесь искать. Ведущий определяет область, которую вы можете обыскать за одно действие — обычно это 30 или менее футов по всем измерениям. Если область поиска далеко от вас, вы можете получить штраф. Также ведущий может постановить, что вы должны изменить число действий, если обыскиваемая область особо захламлена.\nВедущий тайно совершает за вас одну проверку Внимания и сравнивает результат со СЛ Скрытности всех необнаруженных или спрятанных существ в области или со СЛ обнаружения каждого объекта в области (которая определяется либо ведущим, либо тем, кто пытался Спрятать объект). Обнаруженное существо может остаться для вас спрятанным, а не видимым, если для его обнаружения вы использовали вспомогательный способ восприятия или если какой-то эффект (например, невидимость) не даёт вам увидеть существо.\n\nКритический успех: каждое необнаруженное или спрятанное существо, против которого получен критический успех, становится для вас видимым. Вы узнаёте местоположение объектов в области, против которых получен критический успех.\nУспех: каждое необнаруженное существо, против которого получен успех, становится для вас спрятанным, а каждое спрятанное существо, против которого получен успех, становится для вас видимым. Вы узнаёте местоположение объектов или получаете намёк на их местонахождение (на усмотрение ведущего).'},
   {name:'Указание', type:'Одно действие', traits:'Слух, Манипуляция, Зрение', desc:'Требования: существо считается необнаруженным для одного или нескольких ваших союзников, но не считается таковым для вас.\n\nВы информируете союзников о существе, которое можете видеть, указывая на него и говоря, на каком оно находится расстоянии. Для ваших союзников это существо считается спрятанным, а не необнаруженным, как обычно. \nЭто преимущество получают только те союзники, которые могут вас видеть \nи находятся в месте, откуда могли бы обнаружить цель. Если ваши союзники \nне слышат или не понимают вас, они должны пройти проверку Внимания против СЛ Скрытности существа и при провале понимают вас неверно и неправильно определяют местоположение цели.'},
   {name:'Помощь товарищу', type:'Реакция', traits:'', desc:'Условие: союзник собирается совершить действие, требующее проверки навыка или атаки. \nТребования: союзник согласен принять вашу помощь, а вы подготовились её оказать (см. ниже).\n\nВы пытаетесь помочь товарищу с выполнением какой-либо задачи. Для использования этого ответного действия вы сначала должны подготовиться к оказанию помощи — как правило, использовав действие в течение своего хода. Вы должны объяснить ведущему, как именно будете помогать, а он на основании этого решит, можете вы помочь или нет.\nПри этом ответном действии вы проходите проверку навыка или выбранного ведущим типа атаки. Как правило, СЛ такой проверки равна 15, но ведущий может изменить её в ту или иную сторону для особенно сложных или простых задач. В зависимости от ситуации ведущий может добавлять различные дескрипторы к вашему действию подготовки или ответному действию Помощь товарищу или даже позволить вам предоставить Помощь товарищу при совершении других проверок, а не только при проверках навыков или атаки.\n\nКритический успех: вы даёте союзнику ситуативный бонус +2 к этой проверке. Если вы умелы в совершённой проверке на мастерском уровне, бонус увеличивается до +3, а если на легендарном — до +4.\nУспех: вы даёте союзнику ситуативный бонус +1 к этой проверке.\nКритический провал: ваш союзник получает ситуативный штраф -1 к этой проверке.'},
+  {id:'reactiveStrike', name:'Внеочередная атака', type:'Реакция', traits:'Атака', desc:'Условие: существо в вашей зоне досягаемости использует действие с дескриптором «движение» или «манипуляция», совершает дистанционную атаку или покидает клетку в ходе совершаемого им действия с дескриптором «движение».\n\nВы замечаете, что враг уязвим, и атакуете его. Совершите Удар в ближнем бою по существу, спровоцировавшему его своими действиями. Если это критический удар, а спровоцировало его действие с дескриптором «манипуляция», вы срываете это действие. Данный Удар не учитывается при определении штрафа за последовательные атаки, также к нему не применяется этот штраф.'},
   {name:'Выжидание', type:'Свободное действие', traits:'', desc:'Вы выжидаете нужного момента. Оставшаяся часть вашего хода откладывается. Вы покидаете порядок инициативы и возвращаетесь в него, совершив свободное действие, спровоцированное концом хода любого другого существа. При этом ваша очередь в порядке инициативы до конца боя сдвигается на новую позицию. Вы не можете предпринимать ответных действий до тех пор, пока не займёте новую позицию в порядке инициативы. Если Выжидание длится целый раунд и при этом вы не занимаете новую позицию в порядке инициативы, ваши действия теряются, инициатива не изменяется и ваш следующий ход совершается при изначальном значении инициативы.\nКогда вы выжидаете, продолжительный урон и другие негативные эффекты, действующие в начале или конце вашего хода, применяются сразу же, когда вы используете Выжидание. Все благоприятные эффекты, которые должны были завершиться в ваш ход, также завершаются. Ведущий может постановить, что при Выжидании завершаются и другие эффекты. Выражаясь проще, вы не можете применять это свободное действие с целью избежать негативных последствий в ваш ход или чтобы растянуть время действия благоприятных эффектов, которые должны были закончиться в ваш ход.'},
   {name:'Подготовка действия', type:'Два действия', traits:'Концентрация', desc:'Вы готовитесь применить действие вне вашего хода. Выберите одно из доступных вам одиночных или свободных действий и определите условие его применения. Ваш ход после этого завершается. Если до начала вашего следующего хода выполнится требуемое условие, вы можете использовать выбранное действие в качестве ответного действия (если всё ещё соответствуете требованиям). Вы не можете подготовить свободное действие, если для него уже есть условие применения.\nЕсли у вас есть штраф за последовательные атаки и вы подготовили действие с дескриптором «атака», оно использует значение штрафа, бывшее у вас на момент Подготовки действия. Это один из немногих случаев, когда штраф за последовательные атаки применяется вне вашего хода.'},
   {name:'Вспомнить информацию', type:'Одно действие', traits:'Концентрация, Тайна', desc:'Вы совершаете проверку навыка, чтобы вспомнить какие-либо связанные с ним сведения. Предложите применяемый навык и задайте ведущему один вопрос. Ведущий определяет СЛ проверки. Возможно, вам придётся обсудить выбранный навык с ведущим и конкретизировать вопрос. Вы можете решить не тратить действие, чтобы Вспомнить информацию, если вам не нравятся доступные варианты.\nКритический успех: вы точно вспоминаете искомую информацию. Ведущий отвечает на вопрос правдиво и либо позволяет задать один дополнительный вопрос, либо предоставляет другие полезные сведения или контекст.\nУспех: вы точно вспоминаете искомую информацию. Ведущий отвечает на вопрос правдиво.\nКритический провал: вы вспоминаете неверную информацию. Ведущий отвечает на вопрос неверно (или решает вовсе не предоставлять сведения, как при провале).'},
@@ -98,6 +99,7 @@ function defaultCharacter(){
     className:'', level:1, mythicPoints:0,
     traits: [], // [{type:'library',id}] или [{type:'custom',name}]
     languages: [], // "Общий", "Эльфийский" и т.п.
+    coinsCollapsed:true,
     aboutCollapsed:true,
     actionsAllCollapsed:false,
     spellSlotsCollapsed:false,
@@ -122,13 +124,13 @@ function defaultCharacter(){
     speeds:{ base:25, extra:[] }, // extra: [{id,name,value}]
     hp:{max:10, current:10, temp:0, resistances:[]}, // resistances: [{id,name,type:'resistance'|'weakness'|'immunity',value}]
     defenses:{
-      ac:{proficiency:'trained', armorBonus:0, dexCap:null, otherBonus:0},
+      ac:{proficiency:'trained', otherBonus:0},
       fort:{proficiency:'trained', otherBonus:0, critUpgrade:false},
       ref:{proficiency:'trained', otherBonus:0, critUpgrade:false},
       will:{proficiency:'trained', otherBonus:0, critUpgrade:false},
     },
     skills: BASE_SKILLS.map(s=>({id:uid(), name:s.name, ability:s.ability, proficiency:'untrained', otherBonus:0, multi:false})),
-    actions: BASIC_ACTIONS.map(a=>({id:uid(), name:a.name, type:a.type, traits: splitTraitsString(a.traits), desc:a.desc, fromFeat:false, favorite:false})),
+    actions: BASIC_ACTIONS.map(instantiateBasicAction),
     equipment:{
       items: [instantiateLibraryItem(getLibraryItem('backpack'), uid)],
       storages: [], // {id,name} — дом/банк, без веса
@@ -193,9 +195,47 @@ function normalizeTraits(raw){
 function splitTraitsString(s){
   return normalizeTraits(s);
 }
+function actionNameKey(name){
+  return String(name || '').trim().toLocaleLowerCase('ru');
+}
+function basicActionKey(action){
+  if(action && action.id) return String(action.id);
+  return actionNameKey(action && action.name);
+}
+function instantiateBasicAction(a){
+  return {
+    id: uid(),
+    basicId: basicActionKey(a),
+    name: a.name,
+    type: a.type,
+    traits: splitTraitsString(a.traits),
+    desc: a.desc,
+    fromFeat: false,
+    favorite: false,
+  };
+}
 function migrateActions(actions){
   if(!Array.isArray(actions)) return null;
-  return actions.map(a=>Object.assign({}, a, {traits: normalizeTraits(a.traits), favorite: !!a.favorite}));
+  const byName = new Map(BASIC_ACTIONS.map(b => [actionNameKey(b.name), b]));
+  const migrated = actions.map(a=>{
+    const next = Object.assign({}, a, {traits: normalizeTraits(a.traits), favorite: !!a.favorite});
+    if(!next.basicId){
+      const match = byName.get(actionNameKey(a.name));
+      if(match) next.basicId = basicActionKey(match);
+    }
+    return next;
+  });
+  const presentIds = new Set(migrated.map(a=>a.basicId).filter(Boolean));
+  const presentNames = new Set(migrated.map(a=>actionNameKey(a.name)));
+  BASIC_ACTIONS.forEach(b=>{
+    const id = basicActionKey(b);
+    const name = actionNameKey(b.name);
+    if(presentIds.has(id) || presentNames.has(name)) return;
+    migrated.push(instantiateBasicAction(b));
+    presentIds.add(id);
+    presentNames.add(name);
+  });
+  return migrated;
 }
 function normalizeRune(raw){
   const rune = raw || {};
@@ -238,10 +278,19 @@ function normalizeEquipmentItem(raw){
     isCurrency: false,
     custom: raw.custom !== false,
     runes: Array.isArray(raw.runes) ? raw.runes.map(normalizeRune) : [],
-    weapon: raw.weapon || null,
-    armor: raw.armor || null,
+    weapon: category === 'weapon' ? normalizeWeaponData(raw.weapon || {}, {instance:true}) : (raw.weapon ? normalizeWeaponData(raw.weapon, {instance:true}) : null),
+    armor: category === 'armor' ? normalizeArmorData(raw.armor || {}) : (raw.armor ? normalizeArmorData(raw.armor) : null),
+    shield: category === 'shield' ? normalizeShieldData(raw.shield || {}) : (raw.shield ? normalizeShieldData(raw.shield) : null),
     consumable: raw.consumable || null,
   };
+  if(category !== 'weapon') item.weapon = null;
+  if(category !== 'armor') item.armor = null;
+  if(category !== 'shield') item.shield = null;
+  if(item.location === 'equipped-shield' && item.shield){
+    const max = item.shield.hpMax;
+    const cur = raw.shieldHpCurrent;
+    item.shieldHpCurrent = cur == null ? max : Math.max(0, Math.min(max, Number(cur) || 0));
+  }
   if(category === 'bag') item.bag = normalizeBagData(raw.bag, uid);
   return item;
 }
@@ -283,14 +332,33 @@ function migrateEquipment(equipment){
     if(item.location === 'carried') item.location = fallback;
     if(isBagItem(item)){
       const parsed = String(item.location || '');
-      if(parsed.startsWith('bag:')) item.location = 'worn';
+      if(parsed.startsWith('bag:') || item.location === 'belt' || item.location === 'equipped-armor' || item.location === 'equipped-shield') item.location = 'worn';
       if(item.location !== 'worn' && !storageIds.has(item.location)) item.location = 'worn';
-    } else if(!item.isCurrency){
-      if(item.location !== 'worn' && !storageIds.has(item.location) && !String(item.location).startsWith('bag:')){
+    } else if(item.isCurrency){
+      if(item.location === 'belt' || item.location === 'equipped-armor' || item.location === 'equipped-shield') item.location = 'worn';
+    } else {
+      if(item.location === 'equipped-armor' && item.category !== 'armor') item.location = 'worn';
+      if(item.location === 'equipped-shield' && item.category !== 'shield'){
+        delete item.shieldHpCurrent;
+        item.location = 'worn';
+      }
+      if(item.location !== 'worn' && item.location !== 'belt' && item.location !== 'equipped-armor' && item.location !== 'equipped-shield' && !storageIds.has(item.location) && !String(item.location).startsWith('bag:')){
         item.location = fallback;
       }
     }
   });
+
+  function uniqueEquipSlot(slot){
+    let seen = false;
+    items.forEach(item=>{
+      if(item.location !== slot) return;
+      if(!seen){ seen = true; return; }
+      if(slot === 'equipped-shield') delete item.shieldHpCurrent;
+      item.location = 'worn';
+    });
+  }
+  uniqueEquipSlot('equipped-armor');
+  uniqueEquipSlot('equipped-shield');
 
   const bagIds = new Set(items.filter(isBagItem).map(item=>item.id));
   items.forEach(item=>{
@@ -356,6 +424,21 @@ function migrateSpellcasting(raw){
   });
 }
 
+function migrateDefenses(raw){
+  const base = defaultCharacter().defenses;
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const acRaw = raw.ac && typeof raw.ac === 'object' ? raw.ac : {};
+  return {
+    ac: {
+      proficiency: acRaw.proficiency || base.ac.proficiency,
+      otherBonus: Number(acRaw.otherBonus) || 0,
+    },
+    fort: Object.assign({}, base.fort, raw.fort || {}),
+    ref: Object.assign({}, base.ref, raw.ref || {}),
+    will: Object.assign({}, base.will, raw.will || {}),
+  };
+}
+
 function migrateFamiliar(raw){
   const base = defaultFamiliar();
   if(!raw || typeof raw !== 'object') return base;
@@ -388,7 +471,7 @@ function normalizeCharacter(parsed){
     abilities: migrateAbilities(parsed.abilities),
     descriptors: Object.assign(defaultCharacter().descriptors, parsed.descriptors||{}),
     hp: Object.assign(defaultCharacter().hp, parsed.hp||{}),
-    defenses: Object.assign(defaultCharacter().defenses, parsed.defenses||{}),
+    defenses: migrateDefenses(parsed.defenses),
     perception: Object.assign({}, defaultCharacter().perception, parsed.perception||{}, {
       senses: Object.assign({}, defaultCharacter().perception.senses, (parsed.perception && parsed.perception.senses) || {})
     }),
@@ -403,6 +486,7 @@ function normalizeCharacter(parsed){
     actions: migrateActions(parsed.actions) || defaultCharacter().actions,
     feats: migrateFeats(parsed.feats),
     skills: migrateSkills(parsed.skills) || defaultCharacter().skills,
+    coinsCollapsed: parsed.coinsCollapsed != null ? !!parsed.coinsCollapsed : true,
     hpCollapsed: parsed.hpCollapsed != null ? !!parsed.hpCollapsed : parsed.mode === 'play',
     defensesCollapsed: parsed.defensesCollapsed != null ? !!parsed.defensesCollapsed : parsed.mode === 'play',
     perceptionCollapsed: parsed.perceptionCollapsed != null ? !!parsed.perceptionCollapsed : parsed.mode === 'play',

@@ -9,7 +9,8 @@ import {
   ITEM_CATEGORY_LABELS,
   bagCompartmentLocation, bagEffectiveBulk, canHoldRunes, compartmentContentsBulk,
   emptyCustomItem, getLibraryItem, instantiateLibraryItem, isBagItem, itemBulkValue,
-  normalizeBagData, normalizeCategory, parseItemLocation, searchLibraryItems, wornCarriedBulk,
+  normalizeArmorData, normalizeBagData, normalizeCategory, normalizeShieldData, normalizeWeaponData,
+  parseItemLocation, parseStatNumber, searchLibraryItems, wornCarriedBulk,
 } from './libraries/items.js';
 
 /* Общие расчёты, используемые вкладками. */
@@ -33,6 +34,74 @@ function profTotal(rank, level){
 }
 function abilityMod(score){ return Math.floor((Number(score||10)-10)/2); }
 function fmtMod(n){ n = Number(n)||0; return (n>=0? '+':'') + n; }
+function equippedItem(slot){
+  return (CH.equipment.items || []).find(item => item.location === slot && !item.isCurrency) || null;
+}
+function itemHasLibraryTrait(item, id){
+  return !!(item && (item.traits || []).some(trait => trait && trait.type === 'library' && trait.id === id));
+}
+function weaponAbilityId(item){
+  const type = item && item.weapon && item.weapon.type === 'ranged' ? 'ranged' : 'melee';
+  if(type === 'ranged') return 'dex';
+  if(itemHasLibraryTrait(item, 'finesse')) return 'dex';
+  return 'str';
+}
+function weaponAttackMod(item){
+  if(!item || !item.weapon) return 0;
+  const ability = weaponAbilityId(item);
+  const abilityModValue = Number(CH.abilities[ability] && CH.abilities[ability].mod) || 0;
+  const prof = profTotal(item.weapon.proficiency || 'untrained', CH.level);
+  return abilityModValue + prof + (Number(item.weapon.otherBonus) || 0);
+}
+function weaponDamageLabel(item){
+  if(!item || !item.weapon) return '';
+  const dice = String(item.weapon.damage || '').trim();
+  const dtype = String(item.weapon.damageType || '').trim();
+  let body = dice;
+  if(item.weapon.type !== 'ranged'){
+    const str = Number(CH.abilities.str && CH.abilities.str.mod) || 0;
+    if(str) body = dice ? dice + (str > 0 ? '+' + str : String(str)) : fmtMod(str);
+  }
+  return [body, dtype].filter(Boolean).join(' ');
+}
+function characterAcInfo(){
+  const armorItem = equippedItem('equipped-armor');
+  const shieldItem = equippedItem('equipped-shield');
+  const armor = armorItem && armorItem.armor;
+  const shield = shieldItem && shieldItem.shield;
+  const dexMod = Number(CH.abilities.dex.mod) || 0;
+  const cap = armor ? parseStatNumber(armor.dexCap) : null;
+  const dexUsed = cap === null ? dexMod : Math.min(dexMod, cap);
+  const armorBonus = armor ? (parseStatNumber(armor.ac) || 0) : 0;
+  const shieldBonus = shield ? (Number(shield.acBonus) || 0) : 0;
+  const total = 10 + armorBonus + dexUsed + profTotal(CH.defenses.ac.proficiency, CH.level) + (Number(CH.defenses.ac.otherBonus) || 0) + shieldBonus;
+  return {total, armorItem, shieldItem, armorBonus, shieldBonus, dexUsed, cap};
+}
+function setItemLocation(item, location){
+  if(!item) return;
+  if(item.isCurrency){
+    if(location === 'belt' || location === 'equipped-armor' || location === 'equipped-shield') location = 'worn';
+  } else if(isBagItem(item)){
+    const parsed = parseItemLocation(location);
+    if(parsed.type === 'bag' || location === 'belt' || location === 'equipped-armor' || location === 'equipped-shield') location = 'worn';
+  } else {
+    if(location === 'equipped-armor' && item.category !== 'armor') location = 'worn';
+    if(location === 'equipped-shield' && item.category !== 'shield') location = 'worn';
+  }
+  if(location === 'equipped-armor' || location === 'equipped-shield'){
+    CH.equipment.items.forEach(entry=>{
+      if(entry === item || entry.location !== location) return;
+      if(location === 'equipped-shield') delete entry.shieldHpCurrent;
+      entry.location = 'worn';
+    });
+  }
+  const prev = item.location;
+  if(prev === 'equipped-shield' && location !== 'equipped-shield') delete item.shieldHpCurrent;
+  item.location = location;
+  if(location === 'equipped-shield' && item.shield && prev !== 'equipped-shield'){
+    item.shieldHpCurrent = Number(item.shield.hpMax) || 0;
+  }
+}
 
 let CH = loadCharacter();
 function save(){ saveCharacter(CH); }
@@ -310,10 +379,8 @@ function renderCharacterTab(){
   const hpPct = CH.hp.max>0 ? Math.max(0, Math.min(100, (CH.hp.current/CH.hp.max)*100)) : 0;
   const tempPct = CH.hp.max>0 ? Math.max(0, Math.min(100-hpPct, (CH.hp.temp/CH.hp.max)*100)) : 0;
 
-  const dexMod = a.dex.mod;
-  const acDexCap = CH.defenses.ac.dexCap;
-  const acDexUsed = (acDexCap!==null && acDexCap!=='') ? Math.min(dexMod, Number(acDexCap)) : dexMod;
-  const acTotal = 10 + acDexUsed + profTotal(CH.defenses.ac.proficiency, level) + Number(CH.defenses.ac.armorBonus||0) + Number(CH.defenses.ac.otherBonus||0);
+  const acInfo = characterAcInfo();
+  const acTotal = acInfo.total;
 
   function saveTotal(key, abilityId){
     const d = CH.defenses[key];
@@ -526,12 +593,11 @@ function renderCharacterTab(){
             <div class="def-box">
               <div class="def-title">Класс Доспеха</div>
               <div class="def-val">${acTotal}</div>
-              ${isPlay() ? '' : `
+              ${isPlay() ? `
+              <div class="play-text" style="margin-top:6px;">${acInfo.armorItem ? escapeHtml(acInfo.armorItem.name) + ' ' + fmtMod(acInfo.armorBonus) : 'Без доспеха'}${acInfo.shieldItem ? ' · ' + escapeHtml(acInfo.shieldItem.name) + ' ' + fmtMod(acInfo.shieldBonus) : ''}</div>` : `
               <select data-ac-prof>${profOptions(CH.defenses.ac.proficiency)}</select>
-              <div class="mini-row">
-                <input type="number" data-ac-armor placeholder="Бонус брони" value="${CH.defenses.ac.armorBonus||0}" title="Бонус брони">
-                <input type="text" data-ac-dexcap placeholder="Кап Лов" value="${CH.defenses.ac.dexCap===null?'':CH.defenses.ac.dexCap}" title="Максимальный бонус Ловкости">
-              </div>
+              <div class="play-text" style="margin-top:6px;">${acInfo.armorItem ? 'Броня: ' + escapeHtml(acInfo.armorItem.name) + ' ' + fmtMod(acInfo.armorBonus) : 'Броня: нет'}</div>
+              <div class="play-text">${acInfo.shieldItem ? 'Щит: ' + escapeHtml(acInfo.shieldItem.name) + ' ' + fmtMod(acInfo.shieldBonus) : 'Щит: нет'}</div>
               <div class="mini-row">
                 <input type="number" data-ac-other placeholder="Прочее" value="${CH.defenses.ac.otherBonus||0}" title="Прочие бонусы">
               </div>`}
@@ -815,14 +881,6 @@ function wireCharacterTab(){
 
   const acProf = root.querySelector('[data-ac-prof]');
   if(acProf) acProf.addEventListener('change', e=>{ CH.defenses.ac.proficiency=e.target.value; save(); renderApp(); });
-  const acArmor = root.querySelector('[data-ac-armor]');
-  if(acArmor) acArmor.addEventListener('input', e=>{ CH.defenses.ac.armorBonus=Number(e.target.value)||0; save(); renderApp(); });
-  const acDex = root.querySelector('[data-ac-dexcap]');
-  if(acDex) acDex.addEventListener('input', e=>{
-    const v = e.target.value.trim();
-    CH.defenses.ac.dexCap = v==='' ? null : Number(v);
-    save(); renderApp();
-  });
   const acOther = root.querySelector('[data-ac-other]');
   if(acOther) acOther.addEventListener('input', e=>{ CH.defenses.ac.otherBonus=Number(e.target.value)||0; save(); renderApp(); });
 
@@ -1275,7 +1333,10 @@ function fallbackItemLocation(excludeBagId){
   return bagCompartmentLocation(bag.id, bag.bag.compartments[0].id);
 }
 function locationLabel(loc){
-  if(loc === 'worn') return 'Надето';
+  if(loc === 'worn') return 'С собой';
+  if(loc === 'belt') return 'На поясе';
+  if(loc === 'equipped-armor') return 'Надето: броня';
+  if(loc === 'equipped-shield') return 'Надето: щит';
   if(loc === 'carried') return 'В сумке';
   const parsed = parseItemLocation(loc);
   if(parsed.type === 'bag'){
@@ -1286,11 +1347,18 @@ function locationLabel(loc){
     return bag.name;
   }
   const storage = CH.equipment.storages.find(entry=>entry.id === loc);
-  return storage ? storage.name : 'Надето';
+  return storage ? storage.name : 'С собой';
 }
 function locationOptions(current, opts={}){
-  const options = [`<option value="worn" ${current==='worn'?'selected':''}>Надето</option>`];
+  const options = [`<option value="worn" ${current==='worn'?'selected':''}>С собой</option>`];
   if(!opts.forBag){
+    options.push(`<option value="belt" ${current==='belt'?'selected':''}>На поясе</option>`);
+    if(!opts.category || opts.category === 'armor'){
+      options.push(`<option value="equipped-armor" ${current==='equipped-armor'?'selected':''}>Надето: броня</option>`);
+    }
+    if(!opts.category || opts.category === 'shield'){
+      options.push(`<option value="equipped-shield" ${current==='equipped-shield'?'selected':''}>Надето: щит</option>`);
+    }
     CH.equipment.items.filter(isBagItem).forEach(bag=>{
       bag.bag.compartments.forEach(compartment=>{
         const value = bagCompartmentLocation(bag.id, compartment.id);
@@ -1342,8 +1410,15 @@ function fillBarHtml(used, cap){
 function itemStatsHtml(item){
   if(item.weapon){
     const w = item.weapon;
-    const parts = [w.damage, w.damageType, w.group, w.hands ? `${w.hands} рук.` : '', w.range, w.reload !== '' && w.reload != null ? `перезарядка ${w.reload}` : '', w.ammo].filter(part=>part);
-    if(parts.length) return `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>`;
+    const combat = `${fmtMod(weaponAttackMod(item))} · ${weaponDamageLabel(item)}`;
+    const parts = [
+      w.type === 'ranged' ? 'дальнобойное' : 'ближний бой',
+      w.group, w.hands ? `${w.hands} рук.` : '',
+      w.type === 'ranged' ? w.range : '',
+      w.type === 'ranged' && w.reload !== '' && w.reload != null ? `перезарядка ${w.reload}` : '',
+      w.type === 'ranged' ? w.ammo : '',
+    ].filter(part=>part);
+    return `<div class="weapon-combat"><span class="atk">${escapeHtml(combat)}</span></div>${parts.length ? `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>` : ''}`;
   }
   if(item.armor){
     const a = item.armor;
@@ -1353,6 +1428,15 @@ function itemStatsHtml(item){
       a.armorCategory, a.group,
       a.speedPenalty ? `скорость ${a.speedPenalty}` : '',
       a.strength ? `сила ${a.strength}` : '',
+    ].filter(Boolean);
+    if(parts.length) return `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>`;
+  }
+  if(item.shield){
+    const s = item.shield;
+    const parts = [
+      s.acBonus ? `КБ ${fmtMod(s.acBonus)}` : '',
+      s.hardness ? `твёрдость ${s.hardness}` : '',
+      s.hpMax ? `ПЗ ${s.hpMax}` : '',
     ].filter(Boolean);
     if(parts.length) return `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>`;
   }
@@ -1385,6 +1469,11 @@ function bagsAt(location){
 }
 function itemRowHtml(item){
   const play = isPlay();
+  const weaponSetup = (!play && item.weapon) ? `
+          <div class="weapon-setup-row">
+            <select data-wpn-prof="${item.id}">${PROF_RANKS.map(r=>`<option value="${r}" ${r===(item.weapon.proficiency||'untrained')?'selected':''}>${PROF_LABEL[r]}</option>`).join('')}</select>
+            <input type="number" data-wpn-other="${item.id}" value="${item.weapon.otherBonus||0}" title="Прочее">
+          </div>` : '';
   return `
     <div class="list-item" data-item-id="${item.id}" data-reorder-id="${item.id}" data-reorder-group="${escapeAttr(item.location)}">
       <div class="list-item-head ${play ? 'eq-play-head' : ''}" data-item-toggle>
@@ -1392,6 +1481,7 @@ function itemRowHtml(item){
           <div class="n">${escapeHtml(item.name)}</div>
           <div class="meta">${escapeHtml(ITEM_CATEGORY_LABELS[item.category] || '')} · объём ${formatBulk(item.bulk)}${item.note ? ' · ' + escapeHtml(item.note) : ''}</div>
           ${itemStatsHtml(item)}
+          ${weaponSetup}
           ${tagsMetaHtml(item.traits)}
           ${runesHtml(item)}
         </div>
@@ -1401,7 +1491,7 @@ function itemRowHtml(item){
       <div class="eq-item-controls">
         <span class="drag-handle" data-equipment-drag-handle aria-label="Перетащить предмет" title="Перетащить предмет">⠿</span>
         <div class="qty"><input type="number" min="0" data-qty="${item.id}" value="${item.qty}"></div>
-        <select class="locsel" data-loc="${item.id}">${locationOptions(item.location)}</select>
+        <select class="locsel" data-loc="${item.id}">${locationOptions(item.location, {category: item.category})}</select>
         <button class="skill-del" data-item-edit="${item.id}" title="Изменить">✎</button>
         ${item.custom !== false ? `<button class="skill-del" data-item-del="${item.id}" title="Удалить">✕</button>` : '<span style="width:18px;display:inline-block"></span>'}
       </div>`}
@@ -1459,6 +1549,63 @@ function bagCardHtml(bag){
     </div>`;
 }
 
+function currencySummary(location){
+  const short = {cp:'мм', sp:'см', gp:'зм', pp:'пм'};
+  const parts = CURRENCY_DEFS.map(def=>{
+    const qty = getCurrencyQty(location, def.key);
+    return qty ? `${qty} ${short[def.key]}` : null;
+  }).filter(Boolean);
+  return parts.join(' · ') || 'Нет монет';
+}
+function shieldHpButtonsHtml(item){
+  const max = Number(item.shield && item.shield.hpMax) || 0;
+  const current = item.shieldHpCurrent == null ? max : clamp(Number(item.shieldHpCurrent)||0, 0, max);
+  return `
+    <div class="shield-hp">
+      <div class="shield-hp-value"><span class="hp-num">${current}</span><span class="hp-max"> / ${max}</span></div>
+      <div class="hp-btns shield-hp-btns">
+        <button class="btn hp-delta hp-minus" data-shield-hp="${item.id}" data-delta="-5">−5</button>
+        <button class="btn hp-delta hp-minus" data-shield-hp="${item.id}" data-delta="-1">−1</button>
+        <button class="btn hp-delta hp-plus" data-shield-hp="${item.id}" data-delta="1">+1</button>
+        <button class="btn hp-delta hp-plus" data-shield-hp="${item.id}" data-delta="5">+5</button>
+      </div>
+    </div>`;
+}
+function equipSlotHtml(kind){
+  const loc = kind === 'armor' ? 'equipped-armor' : 'equipped-shield';
+  const item = equippedItem(loc);
+  const title = kind === 'armor' ? 'Броня' : 'Щит';
+  const emptyLabel = kind === 'armor' ? 'Нет брони' : 'Нет щита';
+  const candidates = regularItemsAt('worn').filter(entry=>entry.category === kind);
+  if(!item){
+    return `
+      <div class="equip-slot empty">
+        <div class="equip-slot-k">${title}</div>
+        <div class="empty-hint" style="padding:6px 0;">${emptyLabel}</div>
+        ${isPlay() || !candidates.length ? '' : `
+        <select data-equip-slot="${kind}">
+          <option value="">— надеть ${kind === 'armor' ? 'броню' : 'щит'} —</option>
+          ${candidates.map(entry=>`<option value="${entry.id}">${escapeHtml(entry.name)}</option>`).join('')}
+        </select>`}
+      </div>`;
+  }
+  const extra = kind === 'armor'
+    ? itemStatsHtml(item)
+    : `${itemStatsHtml(item)}${shieldHpButtonsHtml(item)}`;
+  return `
+    <div class="equip-slot">
+      <div class="equip-slot-k">${title}</div>
+      <div class="n">${escapeHtml(item.name)}</div>
+      ${extra}
+      ${tagsMetaHtml(item.traits)}
+      ${isPlay() ? '' : `
+      <div class="equip-slot-actions">
+        <button class="btn btn-sm" data-unequip="${item.id}">Снять</button>
+        <button class="skill-del" data-item-edit="${item.id}" title="Изменить">✎</button>
+      </div>`}
+    </div>`;
+}
+
 function renderEquipmentTab(){
   const items = CH.equipment.items;
   const carriedTotalBulk = wornCarriedBulk(items);
@@ -1469,7 +1616,8 @@ function renderEquipmentTab(){
   const over = carriedTotalBulk > maxBulk;
 
   const wornBags = bagsAt('worn').map(bagCardHtml).join('');
-  const wornItems = regularItemsAt('worn').map(itemRowHtml).join('') || (!bagsAt('worn').length ? '<div class="empty-hint">Ничего не надето</div>' : '');
+  const wornItems = regularItemsAt('worn').map(itemRowHtml).join('') || (!bagsAt('worn').length ? '<div class="empty-hint">Ничего нет с собой</div>' : '');
+  const beltItems = regularItemsAt('belt').map(itemRowHtml).join('') || '<div class="empty-hint">На поясе пусто</div>';
 
   const storagesHtml = isPlay() ? '' : CH.equipment.storages.map(storage=>{
     const bags = bagsAt(storage.id).map(bagCardHtml).join('');
@@ -1502,10 +1650,37 @@ function renderEquipmentTab(){
       </div>
 
       <div class="card">
+        <div class="card-header" data-collapse-toggle="coinsCollapsed">
+          <h3>Монеты</h3>
+          <div class="coin-head-right">
+            <span class="coin-summary">${currencySummary('worn')}</span>
+            <svg class="chev ${!CH.coinsCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="card-body ${CH.coinsCollapsed?'collapsed':''}">
+          ${currencyGridHtml('worn')}
+        </div>
+      </div>
+
+      <div class="card">
         <h3 style="margin-bottom:8px;">Надето</h3>
-        ${currencyGridHtml('worn')}
+        <div class="equip-slots">
+          ${equipSlotHtml('armor')}
+          ${equipSlotHtml('shield')}
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:8px;">На поясе</h3>
+        ${beltItems}
+        ${isPlay() ? '' : `<button class="btn btn-sm btn-block location-add" data-add-item-loc="belt">+ Предмет на пояс</button>`}
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:8px;">С собой</h3>
         ${wornBags}
         ${wornItems}
+        ${isPlay() ? '' : `<button class="btn btn-sm btn-block location-add" data-add-item-loc="worn">+ Предмет с собой</button>`}
       </div>
 
       ${storagesHtml}
@@ -1523,10 +1698,17 @@ function renderEquipmentTab(){
 }
 
 function weaponFieldsHtml(weapon){
-  const w = weapon || {damage:'', damageType:'', group:'', hands:'', range:'', reload:'', ammo:''};
+  const w = weapon || {type:'melee', damage:'', damageType:'', group:'', hands:'', range:'', reload:'', ammo:''};
+  const ranged = w.type === 'ranged';
   return `
     <div class="form-section" data-cat-section="weapon">
       <h4>Оружие</h4>
+      <div class="field"><label class="field-label">Тип</label>
+        <select id="mfWType">
+          <option value="melee" ${ranged?'':'selected'}>Ближний бой</option>
+          <option value="ranged" ${ranged?'selected':''}>Дальнобойное</option>
+        </select>
+      </div>
       <div class="row2">
         <div class="field"><label class="field-label">Урон</label><input type="text" id="mfWDamage" value="${escapeAttr(w.damage)}"></div>
         <div class="field"><label class="field-label">Тип урона</label><input type="text" id="mfWDamageType" value="${escapeAttr(w.damageType)}"></div>
@@ -1535,11 +1717,13 @@ function weaponFieldsHtml(weapon){
         <div class="field"><label class="field-label">Группа</label><input type="text" id="mfWGroup" value="${escapeAttr(w.group)}"></div>
         <div class="field"><label class="field-label">Руки</label><input type="text" id="mfWHands" value="${escapeAttr(w.hands)}"></div>
       </div>
-      <div class="row2">
-        <div class="field"><label class="field-label">Дистанция</label><input type="text" id="mfWRange" value="${escapeAttr(w.range)}"></div>
-        <div class="field"><label class="field-label">Перезарядка</label><input type="text" id="mfWReload" value="${escapeAttr(w.reload)}"></div>
+      <div id="mfWRangedFields" style="${ranged?'':'display:none'}">
+        <div class="row2">
+          <div class="field"><label class="field-label">Дистанция</label><input type="text" id="mfWRange" value="${escapeAttr(w.range)}"></div>
+          <div class="field"><label class="field-label">Перезарядка</label><input type="text" id="mfWReload" value="${escapeAttr(w.reload)}"></div>
+        </div>
+        <div class="field"><label class="field-label">Боеприпасы</label><input type="text" id="mfWAmmo" value="${escapeAttr(w.ammo)}"></div>
       </div>
-      <div class="field"><label class="field-label">Боеприпасы</label><input type="text" id="mfWAmmo" value="${escapeAttr(w.ammo)}"></div>
     </div>`;
 }
 function armorFieldsHtml(armor){
@@ -1559,6 +1743,18 @@ function armorFieldsHtml(armor){
         <div class="field"><label class="field-label">Штраф скорости</label><input type="text" id="mfASpeed" value="${escapeAttr(a.speedPenalty)}"></div>
         <div class="field"><label class="field-label">Сила</label><input type="text" id="mfAStr" value="${escapeAttr(a.strength)}"></div>
       </div>
+    </div>`;
+}
+function shieldFieldsHtml(shield){
+  const s = shield || {acBonus:0, hardness:0, hpMax:0};
+  return `
+    <div class="form-section" data-cat-section="shield">
+      <h4>Щит</h4>
+      <div class="row2">
+        <div class="field"><label class="field-label">Бонус к КБ</label><input type="number" id="mfSAc" value="${s.acBonus||0}"></div>
+        <div class="field"><label class="field-label">Твёрдость</label><input type="number" id="mfSHard" value="${s.hardness||0}"></div>
+      </div>
+      <div class="field"><label class="field-label">Максимум ПЗ</label><input type="number" id="mfSHp" min="0" value="${s.hpMax||0}"></div>
     </div>`;
 }
 function consumableFieldsHtml(consumable){
@@ -1622,7 +1818,7 @@ function itemFormHtml(item, opts={}){
         <select id="mfCategory" ${opts.lockCategory ? 'disabled' : ''}>${catOpts}</select>
       </div>
       <div class="field"><label class="field-label">Где находится</label>
-        <select id="mfLoc">${locationOptions(item.location || (opts.lockCategory ? 'worn' : fallbackItemLocation()), {forBag: cat === 'bag' || opts.lockCategory})}</select>
+        <select id="mfLoc">${locationOptions(item.location || (opts.lockCategory ? 'worn' : fallbackItemLocation()), {forBag: cat === 'bag' || opts.lockCategory, category: cat})}</select>
       </div>
     </div>
     <div class="field"><label class="field-label">Заметка</label><input type="text" id="mfNote" value="${escapeAttr(item.note)}"></div>
@@ -1630,6 +1826,7 @@ function itemFormHtml(item, opts={}){
     <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
     ${weaponFieldsHtml(item.weapon)}
     ${armorFieldsHtml(item.armor)}
+    ${shieldFieldsHtml(item.shield)}
     ${consumableFieldsHtml(item.consumable)}
     ${bagFieldsHtml(item.bag)}
     <div class="form-section" data-cat-section="weapon,armor,shield">
@@ -1647,9 +1844,12 @@ function syncCategorySections(){
   const loc = byId('mfLoc');
   if(loc){
     const current = loc.value;
-    loc.innerHTML = locationOptions(current, {forBag: cat === 'bag'});
+    loc.innerHTML = locationOptions(current, {forBag: cat === 'bag', category: cat});
     if(cat === 'bag' && parseItemLocation(current).type === 'bag') loc.value = 'worn';
   }
+  const ranged = byId('mfWRangedFields');
+  const wType = byId('mfWType');
+  if(ranged && wType) ranged.style.display = wType.value === 'ranged' ? '' : 'none';
   const ignoreWrap = byId('mfIgnoreWrap');
   const mode = byId('mfBagMode');
   if(ignoreWrap && mode) ignoreWrap.style.display = mode.value === 'contents' ? '' : 'none';
@@ -1797,24 +1997,45 @@ function applyItemForm(target){
   target.category = category;
   let location = byId('mfLoc').value;
   if(category === 'bag' && parseItemLocation(location).type === 'bag') location = 'worn';
-  target.location = location;
+  setItemLocation(target, location);
   target.note = byId('mfNote').value;
   target.desc = byId('mfDesc').value;
   target.custom = true;
   target.isCurrency = false;
   if(category === 'weapon'){
-    target.weapon = {
+    const prev = target.weapon || {};
+    target.weapon = normalizeWeaponData({
+      type: byId('mfWType').value,
       damage: byId('mfWDamage').value, damageType: byId('mfWDamageType').value,
       group: byId('mfWGroup').value, hands: byId('mfWHands').value,
-      range: byId('mfWRange').value, reload: byId('mfWReload').value, ammo: byId('mfWAmmo').value,
-    };
+      range: byId('mfWRange') ? byId('mfWRange').value : '',
+      reload: byId('mfWReload') ? byId('mfWReload').value : '',
+      ammo: byId('mfWAmmo') ? byId('mfWAmmo').value : '',
+      proficiency: prev.proficiency, otherBonus: prev.otherBonus,
+    }, {instance:true});
   } else target.weapon = null;
   if(category === 'armor'){
-    target.armor = {
+    target.armor = normalizeArmorData({
       ac: byId('mfAAc').value, dexCap: byId('mfADexCap').value, group: byId('mfAGroup').value,
       armorCategory: byId('mfACat').value, speedPenalty: byId('mfASpeed').value, strength: byId('mfAStr').value,
-    };
+    });
   } else target.armor = null;
+  if(category === 'shield'){
+    const max = Math.max(0, Number(byId('mfSHp').value) || 0);
+    target.shield = normalizeShieldData({
+      acBonus: Number(byId('mfSAc').value) || 0,
+      hardness: Number(byId('mfSHard').value) || 0,
+      hpMax: max,
+    });
+    if(target.location === 'equipped-shield'){
+      target.shieldHpCurrent = Math.max(0, Math.min(max, target.shieldHpCurrent == null ? max : Number(target.shieldHpCurrent) || 0));
+    } else {
+      delete target.shieldHpCurrent;
+    }
+  } else {
+    target.shield = null;
+    delete target.shieldHpCurrent;
+  }
   if(category === 'consumable'){
     target.consumable = {usage: byId('mfCUsage').value, activation: byId('mfCAct').value};
   } else target.consumable = null;
@@ -1866,6 +2087,8 @@ function openItemEditor(opts){
       syncCategorySections();
       runesEditor.refresh();
     });
+    const wType = byId('mfWType');
+    if(wType) wType.addEventListener('change', syncCategorySections);
     syncCategorySections();
     if(isNew){
       const box = byId('mfItemSuggestions');
@@ -1922,6 +2145,7 @@ function deleteEquipmentItem(id){
 
 function wireEquipmentTab(){
   const root = document.querySelector('.page.active');
+  wireCollapsibles(root);
   wireListItemToggles(root);
   root.querySelectorAll('[data-bag-toggle]').forEach(head=>{
     head.addEventListener('click', e=>{
@@ -1959,7 +2183,62 @@ function wireEquipmentTab(){
       if(!item) return;
       let location = sel.value;
       if(isBagItem(item) && parseItemLocation(location).type === 'bag') location = 'worn';
-      item.location = location;
+      setItemLocation(item, location);
+      save();
+      renderApp();
+    });
+  });
+  root.querySelectorAll('[data-equip-slot]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const id = sel.value;
+      if(!id) return;
+      const item = CH.equipment.items.find(entry=>entry.id === id);
+      if(!item) return;
+      setItemLocation(item, sel.dataset.equipSlot === 'armor' ? 'equipped-armor' : 'equipped-shield');
+      save();
+      renderApp();
+    });
+  });
+  root.querySelectorAll('[data-unequip]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const item = CH.equipment.items.find(entry=>entry.id === btn.dataset.unequip);
+      if(!item) return;
+      setItemLocation(item, 'worn');
+      save();
+      renderApp();
+    });
+  });
+  root.querySelectorAll('[data-shield-hp]').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      const item = CH.equipment.items.find(entry=>entry.id === btn.dataset.shieldHp);
+      if(!item || !item.shield || item.location !== 'equipped-shield') return;
+      const max = Number(item.shield.hpMax) || 0;
+      const cur = item.shieldHpCurrent == null ? max : Number(item.shieldHpCurrent) || 0;
+      item.shieldHpCurrent = clamp(cur + (Number(btn.dataset.delta) || 0), 0, max);
+      const sign = Number(btn.dataset.delta) < 0 ? String(btn.dataset.delta) : ('+' + btn.dataset.delta);
+      showToast('ПЗ щита ' + sign + ' → ' + item.shieldHpCurrent, Number(btn.dataset.delta) < 0 ? 'bad' : 'good');
+      queueFlash('.shield-hp .hp-num', Number(btn.dataset.delta) < 0 ? 'bad' : 'good');
+      save();
+      renderApp();
+    });
+  });
+  root.querySelectorAll('[data-wpn-prof]').forEach(sel=>{
+    sel.addEventListener('change', e=>{
+      e.stopPropagation();
+      const item = CH.equipment.items.find(entry=>entry.id === sel.dataset.wpnProf);
+      if(!item || !item.weapon) return;
+      item.weapon.proficiency = sel.value;
+      save();
+      renderApp();
+    });
+  });
+  root.querySelectorAll('[data-wpn-other]').forEach(inp=>{
+    inp.addEventListener('input', e=>{
+      e.stopPropagation();
+      const item = CH.equipment.items.find(entry=>entry.id === inp.dataset.wpnOther);
+      if(!item || !item.weapon) return;
+      item.weapon.otherBonus = Number(inp.value) || 0;
       save();
       renderApp();
     });
@@ -3298,7 +3577,7 @@ function renderSettingsTab(){
         <div class="more-item" style="border:none;padding-top:0;">
           <div><div class="t">Автосохранение</div><div class="d">Данные хранятся локально в кэше браузера. Последнее сохранение: ${savedDate}</div></div>
         </div>
-        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.2</div>
+        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.3</div>
       </div>
     </div>
   `;

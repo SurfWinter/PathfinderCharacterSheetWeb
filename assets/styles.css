@@ -412,6 +412,29 @@ body.settings-open .toast{bottom:28px;}
 .currency-cell{cursor:pointer;}
 .currency-cell input{cursor:text;}
 
+.coin-head-right{display:flex;align-items:center;gap:8px;min-width:0;}
+.coin-summary{font-size:12px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px;}
+.card-header .chev{flex-shrink:0;}
+.equip-slots{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.equip-slot{
+  background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:10px;
+}
+.equip-slot.empty{opacity:.85;}
+.equip-slot-k{font-size:11px;color:var(--text-dim);margin-bottom:4px;font-weight:600;}
+.equip-slot .n{font-size:14.5px;font-weight:600;}
+.equip-slot select{width:100%;margin-top:6px;font-size:12px;}
+.equip-slot-actions{display:flex;align-items:center;gap:6px;margin-top:8px;}
+.weapon-combat{margin-top:4px;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;}
+.weapon-combat .atk{color:var(--text);}
+.weapon-setup-row{display:flex;gap:6px;margin-top:6px;}
+.weapon-setup-row select{flex:1;font-size:12px;padding:5px 6px;}
+.weapon-setup-row input{width:64px;min-width:56px;font-size:12px;padding:5px 6px;text-align:center;}
+.shield-hp{margin-top:8px;}
+.shield-hp-value{text-align:center;}
+.shield-hp-value .hp-num{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;}
+.shield-hp-btns{margin-top:6px;gap:5px;}
+.shield-hp-btns .hp-delta{width:38px;min-width:38px;height:38px;font-size:12px;}
 
 /* spells */
 .slot-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}

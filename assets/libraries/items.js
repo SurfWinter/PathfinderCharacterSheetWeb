@@ -1,6 +1,7 @@
 // Библиотека предметов. category: weapon, armor, shield, gear, consumable, bag, other.
 // Дескрипторы: { type:'library', id } из traits.js или { type:'custom', name }.
-// Боевые поля (weapon / armor / consumable) хранятся текстом и не считаются в механике листа.
+// Оружие: type melee | ranged. Дальность и боеприпасы только у ranged.
+// Щит: acBonus, hardness, hpMax. Текущие ПЗ щита живут на экземпляре, только пока он экипирован.
 
 export const ITEM_CATEGORY_LABELS = {
   weapon: 'Оружие',
@@ -11,6 +12,9 @@ export const ITEM_CATEGORY_LABELS = {
   bag: 'Сумка',
   other: 'Разное',
 };
+
+export const ON_PERSON_LOCATIONS = ['worn', 'belt', 'equipped-armor', 'equipped-shield'];
+const WEAPON_PROF_RANKS = ['untrained', 'trained', 'expert', 'master', 'legendary'];
 
 export const ITEM_LIBRARY = [
   {
@@ -98,13 +102,11 @@ export const ITEM_LIBRARY = [
     ],
     desc: 'Тяжёлые клинки этих мечей длиной 3-4 фута и могут иметь одностороннюю или двустороннюю заточку.',
     weapon: {
+      type: 'melee',
       damage: '1d8',
       damageType: 'рубящий',
       group: 'меч',
       hands: '1',
-      range: '',
-      reload: '',
-      ammo: '',
     },
   },
 
@@ -119,6 +121,7 @@ export const ITEM_LIBRARY = [
     ],
     desc: 'Длинный лук выше большинства людей и при стрельбе упирается одним концом в землю. Он стреляет на большую дистанцию, но неудобен в тесноте.',
     weapon: {
+      type: 'ranged',
       damage: '1d8',
       damageType: 'колющий',
       group: 'лук',
@@ -145,6 +148,20 @@ export const ITEM_LIBRARY = [
       armorCategory: 'Тяжёлая',
       speedPenalty: '-10 фт',
       strength: '+4',
+    },
+  },
+
+  {
+    id: 'steelShield',
+    name: 'Стальной щит',
+    category: 'shield',
+    bulk: 1,
+    traits: [],
+    desc: 'Тяжёлый стальной щит, который держат за рукоять. Пока щит экипирован, он даёт бонус к КБ.',
+    shield: {
+      acBonus: 2,
+      hardness: 5,
+      hpMax: 20,
     },
   },
 
@@ -200,6 +217,55 @@ export function getLibraryItem(id){
 export function normalizeCategory(value){
   const key = String(value || 'other').toLowerCase();
   return ITEM_CATEGORY_LABELS[key] ? key : 'other';
+}
+
+export function parseStatNumber(value){
+  if(value === null || value === undefined || value === '') return null;
+  const n = Number(String(value).replace(',', '.').replace(/[^\d.+-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+export function normalizeWeaponData(raw, opts={}){
+  if(!raw || typeof raw !== 'object') return null;
+  let type = raw.type === 'ranged' || raw.type === 'melee' ? raw.type : null;
+  if(!type) type = (raw.range || raw.ammo) ? 'ranged' : 'melee';
+  const ranged = type === 'ranged';
+  const data = {
+    type,
+    damage: raw.damage || '',
+    damageType: raw.damageType || '',
+    group: raw.group || '',
+    hands: raw.hands || '',
+    range: ranged ? (raw.range || '') : '',
+    reload: ranged ? (raw.reload || '') : '',
+    ammo: ranged ? (raw.ammo || '') : '',
+  };
+  if(opts.instance){
+    data.proficiency = WEAPON_PROF_RANKS.includes(raw.proficiency) ? raw.proficiency : 'untrained';
+    data.otherBonus = Number(raw.otherBonus) || 0;
+  }
+  return data;
+}
+
+export function normalizeArmorData(raw){
+  if(!raw || typeof raw !== 'object') return null;
+  return {
+    ac: raw.ac || '',
+    dexCap: raw.dexCap == null ? '' : String(raw.dexCap),
+    group: raw.group || '',
+    armorCategory: raw.armorCategory || '',
+    speedPenalty: raw.speedPenalty || '',
+    strength: raw.strength || '',
+  };
+}
+
+export function normalizeShieldData(raw){
+  if(!raw || typeof raw !== 'object') return null;
+  return {
+    acBonus: Number(raw.acBonus) || 0,
+    hardness: Number(raw.hardness) || 0,
+    hpMax: Math.max(0, Number(raw.hpMax) || 0),
+  };
 }
 
 function copyTraits(traits){
@@ -268,8 +334,9 @@ export function instantiateLibraryItem(entry, makeId){
     isCurrency: false,
     custom: true,
     runes: [],
-    weapon: entry.weapon ? Object.assign({}, entry.weapon) : null,
-    armor: entry.armor ? Object.assign({}, entry.armor) : null,
+    weapon: category === 'weapon' ? normalizeWeaponData(entry.weapon || {}, {instance:true}) : null,
+    armor: category === 'armor' ? normalizeArmorData(entry.armor || {}) : null,
+    shield: category === 'shield' ? normalizeShieldData(entry.shield || {}) : null,
     consumable: entry.consumable ? Object.assign({}, entry.consumable) : null,
   };
   if(category === 'bag'){
@@ -295,8 +362,12 @@ export function emptyCustomItem(category, makeId){
     runes: [],
     weapon: null,
     armor: null,
+    shield: null,
     consumable: null,
   };
+  if(item.category === 'weapon') item.weapon = normalizeWeaponData({type:'melee'}, {instance:true});
+  if(item.category === 'armor') item.armor = normalizeArmorData({});
+  if(item.category === 'shield') item.shield = normalizeShieldData({acBonus:1, hardness:3, hpMax:12});
   if(item.category === 'bag'){
     item.bag = normalizeBagData({weightMode:'contents', ignoreBulk:0, capacity:4, cell:1}, makeId);
   }
@@ -316,8 +387,15 @@ export function bagCompartmentLocation(bagId, compartmentId){
   return `bag:${bagId}:${compartmentId}`;
 }
 
+export function isOnPersonLocation(location){
+  return ON_PERSON_LOCATIONS.includes(location);
+}
+
 export function parseItemLocation(location){
   if(location === 'worn') return {type:'worn'};
+  if(location === 'belt') return {type:'belt'};
+  if(location === 'equipped-armor') return {type:'equipped-armor'};
+  if(location === 'equipped-shield') return {type:'equipped-shield'};
   if(typeof location === 'string' && location.startsWith('bag:')){
     const parts = location.split(':');
     return {type:'bag', bagId:parts[1], compartmentId:parts[2]};
@@ -350,7 +428,7 @@ export function bagEffectiveBulk(items, bag){
 
 export function wornCarriedBulk(items){
   return items.reduce((sum, item)=>{
-    if(item.location !== 'worn') return sum;
+    if(!isOnPersonLocation(item.location)) return sum;
     if(item.isCurrency) return sum + itemBulkValue(item);
     if(isBagItem(item)) return sum + bagEffectiveBulk(items, item);
     return sum + itemBulkValue(item);
