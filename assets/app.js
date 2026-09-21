@@ -3,7 +3,7 @@ import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
 import { instantiateLibraryFamiliarAbility, getLibraryFamiliarAbility, matchLibraryFamiliarAbility, searchLibraryFamiliarAbilities, DAMAGE_TYPES_RESISTANCE, SKILLED_EXCLUDED, hasFamiliarEffect, familiarAbilityEffect, skilledSkillsFromAbilities, resistanceFromAbilities } from './libraries/familiar-abilities.js';
-import { TRAIT_LIBRARY, getLibraryTrait } from './libraries/traits.js';
+import { TRAIT_LIBRARY, getLibraryTrait, matchLibraryTrait } from './libraries/traits.js';
 import { instantiateLibraryRune, searchLibraryRunes } from './libraries/runes.js';
 import {
   ITEM_CATEGORY_LABELS,
@@ -708,8 +708,10 @@ function wireCharacterTab(){
   }
   if(traitAddBtn) traitAddBtn.addEventListener('click', ()=>{
     const v = traitInputEl.value.trim();
-    const trait = {type:'custom', name:v};
-    if(v && !hasCharacterTrait(trait)){ CH.traits.push(trait); save(); renderApp(); }
+    if(!v) return;
+    const library = matchLibraryTrait(v);
+    const trait = library ? {type:'library', id:library.id} : {type:'custom', name:v};
+    if(!hasCharacterTrait(trait)){ CH.traits.push(trait); save(); renderApp(); }
   });
   if(traitInputEl){
     traitInputEl.addEventListener('input', renderCharacterTraitSuggestions);
@@ -1070,9 +1072,11 @@ function createTagEditor(initialTags){
   }
   function addTag(){
     const v = input.value.trim();
-    const tag = {type:'custom', name:v};
-    if(v && !hasTag(tag)) tags.push(tag);
-    if(v){ input.value=''; renderSuggestions(); renderChips(); input.focus(); }
+    if(!v) return;
+    const library = matchLibraryTrait(v);
+    const tag = library ? {type:'library', id:library.id} : {type:'custom', name:v};
+    if(!hasTag(tag)) tags.push(tag);
+    input.value=''; renderSuggestions(); renderChips(); input.focus();
   }
   addBtn.addEventListener('click', addTag);
   input.addEventListener('input', renderSuggestions);
@@ -3042,8 +3046,10 @@ function wireFamiliarTab(){
   }
   if(traitAddBtn) traitAddBtn.addEventListener('click', ()=>{
     const v = traitInputEl.value.trim();
-    const trait = {type:'custom', name:v};
-    if(v && !hasFamTrait(trait)){ F.traits.push(trait); save(); renderApp(); }
+    if(!v) return;
+    const library = matchLibraryTrait(v);
+    const trait = library ? {type:'library', id:library.id} : {type:'custom', name:v};
+    if(!hasFamTrait(trait)){ F.traits.push(trait); save(); renderApp(); }
   });
   if(traitInputEl){
     traitInputEl.addEventListener('input', renderFamTraitSuggestions);

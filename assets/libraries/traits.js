@@ -133,7 +133,19 @@ export const TRAIT_LIBRARY = [
 ];
 
 const traitsById = new Map(TRAIT_LIBRARY.map(trait => [trait.id, trait]));
+const traitsByName = new Map(TRAIT_LIBRARY.map(trait => [trait.name.toLocaleLowerCase('ru'), trait]));
+const TRAIT_NAME_ALIASES = {
+  'перемещение': 'move',
+};
 
 export function getLibraryTrait(id){
   return traitsById.get(id) || null;
+}
+
+export function matchLibraryTrait(name){
+  const key = String(name || '').trim().toLocaleLowerCase('ru');
+  if(!key) return null;
+  const aliasId = TRAIT_NAME_ALIASES[key];
+  if(aliasId) return traitsById.get(aliasId) || null;
+  return traitsByName.get(key) || null;
 }
