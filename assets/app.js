@@ -2,6 +2,7 @@ import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterPr
 import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
+import { instantiateLibraryFamiliarAbility, getLibraryFamiliarAbility, searchLibraryFamiliarAbilities } from './libraries/familiar-abilities.js';
 import { TRAIT_LIBRARY, getLibraryTrait } from './libraries/traits.js';
 import { instantiateLibraryRune, searchLibraryRunes } from './libraries/runes.js';
 import {
@@ -37,14 +38,13 @@ let CH = loadCharacter();
 function save(){ saveCharacter(CH); }
 
 /* ---------- tabs / navigation ---------- */
-const TABS = [
+const BASE_TABS = [
   {id:'character', label:'Персонаж', icon:'user'},
   {id:'actions', label:'Действия', icon:'bolt'},
   {id:'equipment', label:'Снаряжение', icon:'bag'},
   {id:'spells', label:'Заклинания', icon:'spark'},
   {id:'books', label:'Книги', icon:'book'},
   {id:'feats', label:'Черты', icon:'star'},
-  {id:'more', label:'Ещё', icon:'dots'},
 ];
 const ICONS = {
   user:'<circle cx="12" cy="8" r="3.4"/><path d="M4.5 20c1.5-4 4.5-6 7.5-6s6 2 7.5 6"/>',
@@ -53,35 +53,98 @@ const ICONS = {
   spark:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"/>',
   book:'<path d="M4 5.5C4 4.7 4.7 4 5.5 4H12v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z"/><path d="M20 5.5c0-.8-.7-1.5-1.5-1.5H12v16h6.5c.8 0 1.5-.7 1.5-1.5v-13Z"/>',
   star:'<path d="M12 3.5l2.6 5.4 5.9.7-4.3 4.1 1.1 5.9-5.3-2.9-5.3 2.9 1.1-5.9-4.3-4.1 5.9-.7L12 3.5Z" stroke-linejoin="round"/>',
-  dots:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  paw:'<circle cx="12" cy="16.2" r="3.4"/><circle cx="6.4" cy="10.2" r="2"/><circle cx="10" cy="7.2" r="2"/><circle cx="14" cy="7.2" r="2"/><circle cx="17.6" cy="10.2" r="2"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 3.2v2.3M12 18.5v2.3M4.5 7l2 1.15M17.5 15.85 19.5 17M4.5 17l2-1.15M17.5 8.15 19.5 7M3.2 12h2.3M18.5 12h2.3"/>',
+  back:'<path d="M15 6 9 12l6 6"/>',
 };
 let activeTab = 'character';
+let settingsReturnTab = 'character';
+
+function visibleTabs(){
+  const tabs = BASE_TABS.slice();
+  if(CH.familiarEnabled){
+    tabs.splice(1, 0, {id:'familiar', label:'Фамильяр', icon:'paw'});
+  }
+  return tabs;
+}
 
 function isPlay(){ return CH.mode === 'play'; }
 
-function renderTopbar(title, subtitle){
+function renderTopbar(title, subtitle, opts){
+  opts = opts || {};
+  if(opts.settings){
+    return `
+      <div class="topbar">
+        <button type="button" class="icon-btn" data-settings-back aria-label="Назад">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS.back}</svg>
+        </button>
+        <div class="topbar-main">
+          <div class="title">${title}</div>
+          <div class="sub">${subtitle||''}</div>
+        </div>
+      </div>
+    `;
+  }
   return `
     <div class="topbar">
-      <div><div class="title">${title}</div><div class="sub">${subtitle||''}</div></div>
-      <div class="mode-switch">
-        <button class="mode-btn ${!isPlay()?'active':''}" data-mode="setup">Настройка</button>
-        <button class="mode-btn play-active ${isPlay()?'active':''}" data-mode="play">Игра</button>
+      <div class="topbar-main">
+        <div class="title">${title}</div>
+        <div class="sub">${subtitle||''}</div>
+      </div>
+      <div class="topbar-right">
+        <div class="mode-switch">
+          <button class="mode-btn ${!isPlay()?'active':''}" data-mode="setup">Настройка</button>
+          <button class="mode-btn play-active ${isPlay()?'active':''}" data-mode="play">Игра</button>
+        </div>
+        <button type="button" class="icon-btn" data-open-settings aria-label="Настройки">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS.gear}</svg>
+        </button>
       </div>
     </div>
   `;
 }
 document.addEventListener('click', (e)=>{
+  const gear = e.target.closest('[data-open-settings]');
+  if(gear){
+    if(activeTab === 'settings') return;
+    settingsReturnTab = activeTab;
+    activeTab = 'settings';
+    renderApp();
+    window.scrollTo(0,0);
+    return;
+  }
+  const back = e.target.closest('[data-settings-back]');
+  if(back){
+    activeTab = (settingsReturnTab === 'familiar' && !CH.familiarEnabled) ? 'character' : (settingsReturnTab || 'character');
+    renderApp();
+    window.scrollTo(0,0);
+    return;
+  }
   const btn = e.target.closest('[data-mode]');
   if(!btn) return;
   if(CH.mode === btn.dataset.mode) return;
   CH.mode = btn.dataset.mode;
+  const compact = CH.mode === 'play';
+  CH.hpCollapsed = compact;
+  CH.defensesCollapsed = compact;
+  CH.perceptionCollapsed = compact;
+  if(CH.familiar){
+    CH.familiar.hpCollapsed = compact;
+    CH.familiar.defensesCollapsed = compact;
+  }
   save();
   renderApp();
 });
 
 function renderNav(){
   const nav = document.getElementById('navbar');
-  nav.innerHTML = TABS.map(t=>`
+  const settings = activeTab === 'settings';
+  document.body.classList.toggle('settings-open', settings);
+  if(settings){
+    nav.innerHTML = '';
+    return;
+  }
+  nav.innerHTML = visibleTabs().map(t=>`
     <button class="nav-item ${t.id===activeTab?'active':''}" data-tab="${t.id}">
       <svg viewBox="0 0 24 24">${ICONS[t.icon]}</svg>
       <span>${t.label}</span>
@@ -115,16 +178,19 @@ function renderApp(){
   }
 
   renderNav();
+  if(activeTab === 'familiar' && !CH.familiarEnabled) activeTab = 'character';
+  if(activeTab === 'more') activeTab = 'settings';
   const app = document.getElementById('app');
   let html = '';
   switch(activeTab){
     case 'character': html = renderCharacterTab(); break;
+    case 'familiar': html = renderFamiliarTab(); break;
     case 'actions': html = renderActionsTab(); break;
     case 'equipment': html = renderEquipmentTab(); break;
     case 'spells': html = renderSpellsTab(); break;
     case 'books': html = renderBooksTab(); break;
     case 'feats': html = renderFeatsTab(); break;
-    case 'more': html = renderMoreTab(); break;
+    case 'settings': html = renderSettingsTab(); break;
   }
   app.innerHTML = html;
   wireCurrentTab();
@@ -145,12 +211,13 @@ function renderApp(){
 function wireCurrentTab(){
   switch(activeTab){
     case 'character': wireCharacterTab(); break;
+    case 'familiar': wireFamiliarTab(); break;
     case 'actions': wireActionsTab(); break;
     case 'equipment': wireEquipmentTab(); break;
     case 'spells': wireSpellsTab(); break;
     case 'books': wireBooksTab(); break;
     case 'feats': wireFeatsTab(); break;
-    case 'more': wireMoreTab(); break;
+    case 'settings': wireSettingsTab(); break;
   }
 }
 
@@ -159,7 +226,9 @@ function wireCollapsibles(root){
   root.querySelectorAll('[data-collapse-toggle]').forEach(h=>{
     h.addEventListener('click', ()=>{
       const key = h.dataset.collapseToggle;
-      CH[key] = !CH[key];
+      const scope = h.dataset.collapseScope;
+      const obj = scope === 'familiar' ? CH.familiar : CH;
+      obj[key] = !obj[key];
       save();
       renderApp();
     });
@@ -231,7 +300,7 @@ function renderCharacterTab(){
       ${!isPlay() ? `
       <span class="drag-handle" data-skill-drag-handle aria-label="Перетащить навык" title="Перетащить навык">⠿</span>` : ''}
       <div class="skill-name">
-        <div class="n">${s.multi ? `<input type="text" class="skill-multi-name" data-skill-name="${s.id}" value="${escapeAttr(s.name)}" placeholder="Название" ${lock}>` : s.name}</div>
+        <div class="n">${s.multi && !isPlay() ? `<input type="text" class="skill-multi-name" data-skill-name="${s.id}" value="${escapeAttr(s.name)}" placeholder="Название">` : escapeHtml(s.name || 'Без названия')}</div>
         <div class="a">${abilityShort(s.ability)}</div>
       </div>
       <div class="skill-prof">
@@ -241,7 +310,7 @@ function renderCharacterTab(){
         <input type="number" data-skill-bonus="${s.id}" value="${s.otherBonus||0}" title="доп. бонус" ${lock}>
       </div>
       <div class="skill-total">${fmtMod(total)}</div>
-      ${s.multi ? `<button class="skill-del" data-skill-del="${s.id}" ${lock}>✕</button>` : '<span style="width:20px;display:inline-block;"></span>'}
+      ${s.multi && !isPlay() ? `<button class="skill-del" data-skill-del="${s.id}">✕</button>` : '<span style="width:20px;display:inline-block;"></span>'}
     </div>`;
   }).join('');
 
@@ -307,8 +376,21 @@ function renderCharacterTab(){
               <button class="btn btn-sm btn-accent" id="languageAddBtn">+</button>
             </div>` : ''}
           </div>
-          <div class="field"><label class="field-label">Внешность</label><textarea id="charAppearance" ${lock}>${escapeHtml_(CH.appearance)}</textarea></div>
-          <div class="field" style="margin-bottom:0;"><label class="field-label">Заметки</label><textarea id="charNotes" ${lock}>${escapeHtml_(CH.notes)}</textarea></div>
+          ${isPlay() ? `
+          <div class="field">
+            <label class="field-label">Внешность</label>
+            ${CH.appearance && CH.appearance.trim()
+              ? `<div class="play-text">${escapeHtml(CH.appearance)}</div>`
+              : `<div class="empty-hint" style="padding:2px 0;">Нет внешности</div>`}
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label class="field-label">Заметки</label>
+            ${CH.notes && CH.notes.trim()
+              ? `<div class="play-text">${escapeHtml(CH.notes)}</div>`
+              : `<div class="empty-hint" style="padding:2px 0;">Нет заметок</div>`}
+          </div>` : `
+          <div class="field"><label class="field-label">Внешность</label><textarea class="autosize" id="charAppearance">${escapeHtml_(CH.appearance)}</textarea></div>
+          <div class="field" style="margin-bottom:0;"><label class="field-label">Заметки</label><textarea class="autosize" id="charNotes">${escapeHtml_(CH.notes)}</textarea></div>`}
         </div>
       </div>
 
@@ -324,98 +406,144 @@ function renderCharacterTab(){
       </div>
 
       <div class="card">
-        <h3 style="margin-bottom:10px;">Здоровье</h3>
-        <div class="hp-main">
-          <span class="hp-num" id="hpCurrentDisplay">${CH.hp.current}</span><span class="hp-max"> / ${CH.hp.max}</span>
-          ${CH.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${CH.hp.temp} врем.</span>`:''}
+        <div class="card-header" data-collapse-toggle="hpCollapsed">
+          <h3>Здоровье</h3>
+          <svg class="chev ${!CH.hpCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
-        <div class="hp-btns">
-          <button class="btn hp-delta" data-delta="-5">-5</button>
-          <button class="btn hp-delta" data-delta="-1">-1</button>
-          <button class="btn hp-delta" data-delta="1">+1</button>
-          <button class="btn hp-delta" data-delta="5">+5</button>
-        </div>
-        <div class="row2" style="margin-top:10px;">
-          <div class="field" style="margin-bottom:0;"><label class="field-label">Текущие ОЗ</label><input type="number" id="hpCurrentInput" value="${CH.hp.current}"></div>
-          <div class="field" style="margin-bottom:0;"><label class="field-label">Максимум ОЗ</label><input type="number" id="hpMaxInput" value="${CH.hp.max}" ${lock}></div>
-        </div>
-        <div class="temp-hp-field">
-          <label>Временные ОЗ</label>
-          <input type="number" id="hpTempInput" value="${CH.hp.temp}" style="width:90px;">
-        </div>
-        <div class="field" style="margin-top:14px;margin-bottom:0;">
-          <label class="field-label">Сопротивления, уязвимости, иммунитеты</label>
-          <div class="tag-chip-box">${(CH.hp.resistances||[]).length ? CH.hp.resistances.map(resistChipHtml).join('') : '<span class="empty-hint" style="padding:2px 0;">Нет</span>'}</div>
-          ${!isPlay() ? `<button class="btn btn-sm btn-accent" id="addResistBtn">+ Добавить</button>` : ''}
-        </div>
-      </div>
-
-      <div class="card">
-        <h3 style="margin-bottom:10px;">Защита</h3>
-        <div class="def-grid">
-          <div class="def-box">
-            <div class="def-title">Класс Доспеха</div>
-            <div class="def-val">${acTotal}</div>
-            <select data-ac-prof ${lock}>${profOptions(CH.defenses.ac.proficiency)}</select>
-            <div class="mini-row">
-              <input type="number" data-ac-armor placeholder="Бонус брони" value="${CH.defenses.ac.armorBonus||0}" title="Бонус брони" ${lock}>
-              <input type="text" data-ac-dexcap placeholder="Кап Лов" value="${CH.defenses.ac.dexCap===null?'':CH.defenses.ac.dexCap}" title="Максимальный бонус Ловкости" ${lock}>
+        ${CH.hpCollapsed ? `
+        <div class="compact-panel compact-hp">
+          <div class="compact-hp-row">
+            <button class="btn hp-delta hp-minus" data-delta="-1">−1</button>
+            <div class="compact-hp-value">
+              <span class="hp-num">${CH.hp.current}</span><span class="hp-max"> / ${CH.hp.max}</span>
+              ${CH.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${CH.hp.temp} врем.</span>`:''}
             </div>
-            <div class="mini-row">
-              <input type="number" data-ac-other placeholder="Прочее" value="${CH.defenses.ac.otherBonus||0}" title="Прочие бонусы" ${lock}>
-            </div>
+            <button class="btn hp-delta hp-plus" data-delta="1">+1</button>
           </div>
-          <div class="def-box">
-            <div class="def-title">Стойкость</div>
-            <div class="def-val">${fmtMod(fortTotal)}</div>
-            <select data-save-prof="fort" ${lock}>${profOptions(CH.defenses.fort.proficiency)}</select>
-            <div class="mini-row"><input type="number" data-save-other="fort" value="${CH.defenses.fort.otherBonus||0}" placeholder="Прочее" ${lock}></div>
-            <label class="crit-toggle"><input type="checkbox" data-save-crit="fort" ${CH.defenses.fort.critUpgrade?'checked':''} ${lock}>Успех → крит. успех</label>
+          <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
+        </div>` : ''}
+        <div class="card-body ${CH.hpCollapsed?'collapsed':''}">
+          <div class="hp-main">
+            <span class="hp-num" id="hpCurrentDisplay">${CH.hp.current}</span><span class="hp-max"> / ${CH.hp.max}</span>
+            ${CH.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${CH.hp.temp} врем.</span>`:''}
           </div>
-          <div class="def-box">
-            <div class="def-title">Реакция</div>
-            <div class="def-val">${fmtMod(refTotal)}</div>
-            <select data-save-prof="ref" ${lock}>${profOptions(CH.defenses.ref.proficiency)}</select>
-            <div class="mini-row"><input type="number" data-save-other="ref" value="${CH.defenses.ref.otherBonus||0}" placeholder="Прочее" ${lock}></div>
-            <label class="crit-toggle"><input type="checkbox" data-save-crit="ref" ${CH.defenses.ref.critUpgrade?'checked':''} ${lock}>Успех → крит. успех</label>
+          <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
+          <div class="hp-btns">
+            <button class="btn hp-delta hp-minus" data-delta="-5">−5</button>
+            <button class="btn hp-delta hp-minus" data-delta="-1">−1</button>
+            <button class="btn hp-delta hp-plus" data-delta="1">+1</button>
+            <button class="btn hp-delta hp-plus" data-delta="5">+5</button>
           </div>
-          <div class="def-box">
-            <div class="def-title">Воля</div>
-            <div class="def-val">${fmtMod(willTotal)}</div>
-            <select data-save-prof="will" ${lock}>${profOptions(CH.defenses.will.proficiency)}</select>
-            <div class="mini-row"><input type="number" data-save-other="will" value="${CH.defenses.will.otherBonus||0}" placeholder="Прочее" ${lock}></div>
-            <label class="crit-toggle"><input type="checkbox" data-save-crit="will" ${CH.defenses.will.critUpgrade?'checked':''} ${lock}>Успех → крит. успех</label>
+          <div class="row2" style="margin-top:10px;">
+            <div class="field" style="margin-bottom:0;"><label class="field-label">Текущие ОЗ</label><input type="number" id="hpCurrentInput" value="${CH.hp.current}"></div>
+            <div class="field" style="margin-bottom:0;"><label class="field-label">Максимум ОЗ</label><input type="number" id="hpMaxInput" value="${CH.hp.max}" ${lock}></div>
+          </div>
+          <div class="temp-hp-field">
+            <label>Временные ОЗ</label>
+            <input type="number" id="hpTempInput" value="${CH.hp.temp}" style="width:90px;">
+          </div>
+          <div class="field" style="margin-top:14px;margin-bottom:0;">
+            <label class="field-label">Сопротивления, уязвимости, иммунитеты</label>
+            <div class="tag-chip-box">${(CH.hp.resistances||[]).length ? CH.hp.resistances.map(resistChipHtml).join('') : '<span class="empty-hint" style="padding:2px 0;">Нет</span>'}</div>
+            ${!isPlay() ? `<button class="btn btn-sm btn-accent" id="addResistBtn">+ Добавить</button>` : ''}
           </div>
         </div>
       </div>
 
       <div class="card">
-        <h3 style="margin-bottom:10px;">Восприятие</h3>
-        <div class="def-box" style="margin-bottom:14px;">
-          <div class="def-title">Внимательность</div>
-          <div class="def-val">${fmtMod(perceptionTotal)}</div>
-          <select data-perception-prof ${lock}>${profOptions(CH.perception.proficiency)}</select>
-          <div class="mini-row"><input type="number" data-perception-other value="${CH.perception.otherBonus||0}" placeholder="Прочее" ${lock}></div>
+        <div class="card-header" data-collapse-toggle="defensesCollapsed">
+          <h3>Защита</h3>
+          <svg class="chev ${!CH.defensesCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        ${senseGroupHtml('precise','Точные')}
-        ${senseGroupHtml('imprecise','Вспомогательные')}
-        ${senseGroupHtml('vague','Дополнительные')}
+        ${CH.defensesCollapsed ? `
+        <div class="compact-panel compact-def">
+          <div class="compact-stat"><span class="k">КБ</span><span class="v">${acTotal}</span></div>
+          <div class="compact-stat"><span class="k">С</span><span class="v">${fmtMod(fortTotal)}</span></div>
+          <div class="compact-stat"><span class="k">Р</span><span class="v">${fmtMod(refTotal)}</span></div>
+          <div class="compact-stat"><span class="k">В</span><span class="v">${fmtMod(willTotal)}</span></div>
+        </div>` : ''}
+        <div class="card-body ${CH.defensesCollapsed?'collapsed':''}">
+          <div class="def-grid">
+            <div class="def-box">
+              <div class="def-title">Класс Доспеха</div>
+              <div class="def-val">${acTotal}</div>
+              <select data-ac-prof ${lock}>${profOptions(CH.defenses.ac.proficiency)}</select>
+              <div class="mini-row">
+                <input type="number" data-ac-armor placeholder="Бонус брони" value="${CH.defenses.ac.armorBonus||0}" title="Бонус брони" ${lock}>
+                <input type="text" data-ac-dexcap placeholder="Кап Лов" value="${CH.defenses.ac.dexCap===null?'':CH.defenses.ac.dexCap}" title="Максимальный бонус Ловкости" ${lock}>
+              </div>
+              <div class="mini-row">
+                <input type="number" data-ac-other placeholder="Прочее" value="${CH.defenses.ac.otherBonus||0}" title="Прочие бонусы" ${lock}>
+              </div>
+            </div>
+            <div class="def-box">
+              <div class="def-title">Стойкость</div>
+              <div class="def-val">${fmtMod(fortTotal)}</div>
+              <select data-save-prof="fort" ${lock}>${profOptions(CH.defenses.fort.proficiency)}</select>
+              <div class="mini-row"><input type="number" data-save-other="fort" value="${CH.defenses.fort.otherBonus||0}" placeholder="Прочее" ${lock}></div>
+              <label class="crit-toggle"><input type="checkbox" data-save-crit="fort" ${CH.defenses.fort.critUpgrade?'checked':''} ${lock}>Успех → крит. успех</label>
+            </div>
+            <div class="def-box">
+              <div class="def-title">Реакция</div>
+              <div class="def-val">${fmtMod(refTotal)}</div>
+              <select data-save-prof="ref" ${lock}>${profOptions(CH.defenses.ref.proficiency)}</select>
+              <div class="mini-row"><input type="number" data-save-other="ref" value="${CH.defenses.ref.otherBonus||0}" placeholder="Прочее" ${lock}></div>
+              <label class="crit-toggle"><input type="checkbox" data-save-crit="ref" ${CH.defenses.ref.critUpgrade?'checked':''} ${lock}>Успех → крит. успех</label>
+            </div>
+            <div class="def-box">
+              <div class="def-title">Воля</div>
+              <div class="def-val">${fmtMod(willTotal)}</div>
+              <select data-save-prof="will" ${lock}>${profOptions(CH.defenses.will.proficiency)}</select>
+              <div class="mini-row"><input type="number" data-save-other="will" value="${CH.defenses.will.otherBonus||0}" placeholder="Прочее" ${lock}></div>
+              <label class="crit-toggle"><input type="checkbox" data-save-crit="will" ${CH.defenses.will.critUpgrade?'checked':''} ${lock}>Успех → крит. успех</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header" data-collapse-toggle="perceptionCollapsed">
+          <h3>Восприятие</h3>
+          <svg class="chev ${!CH.perceptionCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        ${CH.perceptionCollapsed ? `
+        <div class="compact-panel compact-perception">
+          <div class="compact-perception-value">${fmtMod(perceptionTotal)}</div>
+          <div class="tag-chip-box">${['precise','imprecise','vague'].flatMap(key => (CH.perception.senses[key]||[]).map(s=>`<span class="tag-chip">${escapeHtml(s)}</span>`)).join('') || '<span class="empty-hint" style="padding:2px 0;">Нет чувств</span>'}</div>
+        </div>` : ''}
+        <div class="card-body ${CH.perceptionCollapsed?'collapsed':''}">
+          <div class="def-box" style="margin-bottom:14px;">
+            <div class="def-title">Внимательность</div>
+            <div class="def-val">${fmtMod(perceptionTotal)}</div>
+            <select data-perception-prof ${lock}>${profOptions(CH.perception.proficiency)}</select>
+            <div class="mini-row"><input type="number" data-perception-other value="${CH.perception.otherBonus||0}" placeholder="Прочее" ${lock}></div>
+          </div>
+          ${senseGroupHtml('precise','Точные')}
+          ${senseGroupHtml('imprecise','Вспомогательные')}
+          ${senseGroupHtml('vague','Дополнительные')}
+        </div>
       </div>
 
       <div class="card">
         <h3 style="margin-bottom:10px;">Движение</h3>
-        <div class="field">
+        ${isPlay() ? `
+        <div class="compact-speeds">
+          <div class="compact-stat"><span class="k">Наземная</span><span class="v">${CH.speeds.base}</span></div>
+          ${(CH.speeds.extra||[]).map(s=>`
+            <div class="compact-stat"><span class="k">${escapeHtml(s.name||'Скорость')}</span><span class="v">${escapeHtml(s.value || '—')}</span></div>
+          `).join('')}
+        </div>` : `
+        <div class="field speed-setup">
           <label class="field-label">Наземная скорость (футы)</label>
-          <input type="number" id="speedBase" value="${CH.speeds.base}" ${lock}>
+          <input type="number" id="speedBase" class="speed-num" value="${CH.speeds.base}">
         </div>
         ${CH.speeds.extra.length ? `<div style="margin-top:4px;">${CH.speeds.extra.map(s=>`
           <div class="extra-speed-row">
             <span>${escapeHtml(s.name)}${s.value ? ' — '+escapeHtml(s.value) : ''}</span>
-            ${!isPlay() ? `<button data-speed-del="${s.id}">✕</button>` : ''}
+            <button data-speed-del="${s.id}">✕</button>
           </div>
         `).join('')}</div>` : ''}
-        ${!isPlay() ? `<button class="btn btn-sm" id="addSpeedBtn" style="margin-top:10px;">+ Доп. скорость</button>` : ''}
+        <button class="btn btn-sm" id="addSpeedBtn" style="margin-top:10px;">+ Доп. скорость</button>`}
       </div>
 
       <div class="card">
@@ -440,6 +568,15 @@ function resistChipHtml(r){
 }
 function escapeAttr(s){ return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function escapeHtml(s){ return escapeAttr(s).replace(/\n/g,'<br>'); }
+function bindAutosize(el){
+  if(!el) return;
+  const fit = ()=>{
+    el.style.height = 'auto';
+    el.style.height = Math.max(72, el.scrollHeight) + 'px';
+  };
+  el.addEventListener('input', fit);
+  fit();
+}
 
 function wireCharacterTab(){
   const root = document.querySelector('.page.active');
@@ -452,8 +589,16 @@ function wireCharacterTab(){
   byId('descAlignment').addEventListener('input', e=>{ CH.descriptors.alignment=e.target.value; save(); });
   byId('descDeity').addEventListener('input', e=>{ CH.descriptors.deity=e.target.value; save(); });
   byId('descSize').addEventListener('input', e=>{ CH.descriptors.size=e.target.value; save(); });
-  byId('charAppearance').addEventListener('input', e=>{ CH.appearance=e.target.value; save(); });
-  byId('charNotes').addEventListener('input', e=>{ CH.notes=e.target.value; save(); });
+  const appearanceEl = byId('charAppearance');
+  if(appearanceEl){
+    bindAutosize(appearanceEl);
+    appearanceEl.addEventListener('input', e=>{ CH.appearance=e.target.value; save(); });
+  }
+  const notesEl = byId('charNotes');
+  if(notesEl){
+    bindAutosize(notesEl);
+    notesEl.addEventListener('input', e=>{ CH.notes=e.target.value; save(); });
+  }
   byId('charClass').addEventListener('input', e=>{ CH.className=e.target.value; save(); renderApp(); });
   byId('charLevel').addEventListener('input', e=>{ CH.level=Number(e.target.value)||1; save(); renderApp(); });
 
@@ -542,7 +687,8 @@ function wireCharacterTab(){
   });
 
   root.querySelectorAll('.hp-delta').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
       applyHpDelta(Number(btn.dataset.delta));
     });
   });
@@ -2266,14 +2412,462 @@ function wireFeatsTab(){
 }
 
 /* =========================================================================
-   TAB: ЕЩЁ (экспорт/импорт XML, сброс)
+   TAB: ФАМИЛЬЯР
    ========================================================================= */
-function renderMoreTab(){
+function familiarDerived(){
+  const level = Number(CH.level)||1;
+  const spellKey = (CH.spellcasting && CH.spellcasting.ability) || 'int';
+  const spellMod = (CH.abilities[spellKey] && CH.abilities[spellKey].mod) || 0;
+  const special = level + Math.max(3, spellMod);
+  function saveTotal(key, abilityId){
+    const d = CH.defenses[key];
+    return CH.abilities[abilityId].mod + profTotal(d.proficiency, level) + Number(d.otherBonus||0);
+  }
+  return {
+    level,
+    hpMax: 5 * level,
+    specialSkills: special,
+    otherSkills: level,
+    fort: saveTotal('fort','con'),
+    ref: saveTotal('ref','dex'),
+    will: saveTotal('will','wis'),
+  };
+}
+
+function renderFamiliarTab(){
+  const F = CH.familiar;
+  const lock = isPlay() ? 'disabled' : '';
+  const d = familiarDerived();
+  const hpMax = d.hpMax;
+  const hpCur = clamp(Number(F.hp.current)||0, 0, hpMax);
+  const hpPct = hpMax>0 ? Math.max(0, Math.min(100, (hpCur/hpMax)*100)) : 0;
+  const tempPct = hpMax>0 ? Math.max(0, Math.min(100-hpPct, ((F.hp.temp||0)/hpMax)*100)) : 0;
+
+  const traitsHtml = (F.traits||[]).length
+    ? F.traits.map((t,i)=>traitChipHtml(t, !isPlay() ? `<button type="button" data-fam-trait-del="${i}">✕</button>` : '')).join('')
+    : '<div class="empty-hint" style="padding:6px 0;">Дескрипторов пока нет</div>';
+
+  const abilityCards = (F.abilities||[]).map(ab=>`
+    <div class="list-item">
+      <div class="list-item-head" data-item-toggle>
+        <div><div class="name">${escapeHtml(ab.name||'Без названия')}</div></div>
+      </div>
+      <div class="list-item-body">
+        <div>${escapeHtml(ab.desc)||'Без описания'}</div>
+        ${!isPlay() ? `
+        <div class="list-item-actions">
+          <button class="btn btn-sm" data-edit-fam-ability="${ab.id}">Изменить</button>
+          <button class="btn btn-sm btn-danger" data-del-fam-ability="${ab.id}">Удалить</button>
+        </div>` : ''}
+      </div>
+    </div>
+  `).join('') || '<div class="empty-hint">Способностей пока нет</div>';
+
+  const statCols = ABILITY_DEFS.map(def=>`
+    <div class="compact-stat"><span class="k">${abilityShort(def.id)}</span><span class="v">${fmtMod(CH.abilities[def.id].mod)}</span></div>
+  `).join('');
+
+  return `
+    ${renderTopbar('Фамильяр', `${F.kind ? escapeHtml(F.kind) : 'Вид не указан'} · Ур. ${d.level}`)}
+    <div class="page active">
+      <div class="card">
+        <div class="field">
+          <input type="text" class="name-input" id="famName" placeholder="Имя фамильяра" value="${escapeAttr(F.name)}" ${lock}>
+        </div>
+        <div class="row2" style="margin-bottom:0;">
+          <div class="field" style="margin-bottom:0;">
+            <label class="field-label">Вид</label>
+            <input type="text" id="famKind" placeholder="Ворон, кошка, леший…" value="${escapeAttr(F.kind)}" ${lock}>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label class="field-label">Уровень</label>
+            <input type="number" value="${d.level}" disabled title="Совпадает с уровнем хозяина">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:8px;">Дескрипторы</h3>
+        <div class="tag-chip-box">${traitsHtml}</div>
+        ${!isPlay() ? `
+        <div class="tag-input-row">
+          <input type="text" id="famTraitInput" placeholder="Выберите из библиотеки или введите свой…">
+          <button class="btn btn-accent" id="famTraitAddBtn">+</button>
+        </div>
+        <div class="tag-suggestions" id="famTraitSuggestions"></div>` : ''}
+      </div>
+
+      <div class="card">
+        <div class="card-header" data-collapse-toggle="hpCollapsed" data-collapse-scope="familiar">
+          <h3>Здоровье</h3>
+          <svg class="chev ${!F.hpCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        ${F.hpCollapsed ? `
+        <div class="compact-panel compact-hp">
+          <div class="compact-hp-row">
+            <button class="btn hp-delta hp-minus" data-fam-delta="-1">−1</button>
+            <div class="compact-hp-value">
+              <span class="hp-num">${hpCur}</span><span class="hp-max"> / ${hpMax}</span>
+              ${F.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${F.hp.temp} врем.</span>`:''}
+            </div>
+            <button class="btn hp-delta hp-plus" data-fam-delta="1">+1</button>
+          </div>
+          <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
+        </div>` : ''}
+        <div class="card-body ${F.hpCollapsed?'collapsed':''}">
+          <div class="hp-main">
+            <span class="hp-num">${hpCur}</span><span class="hp-max"> / ${hpMax}</span>
+            ${F.hp.temp>0 ? `<span class="pill" style="margin-left:8px;color:#8fb4de;border-color:#3a5474;">+${F.hp.temp} врем.</span>`:''}
+          </div>
+          <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
+          <div class="hp-btns">
+            <button class="btn hp-delta hp-minus" data-fam-delta="-5">−5</button>
+            <button class="btn hp-delta hp-minus" data-fam-delta="-1">−1</button>
+            <button class="btn hp-delta hp-plus" data-fam-delta="1">+1</button>
+            <button class="btn hp-delta hp-plus" data-fam-delta="5">+5</button>
+          </div>
+          <div class="row2" style="margin-top:10px;">
+            <div class="field" style="margin-bottom:0;"><label class="field-label">Текущие ОЗ</label><input type="number" id="famHpCurrent" value="${hpCur}"></div>
+            <div class="field" style="margin-bottom:0;"><label class="field-label">Максимум ОЗ</label><input type="number" value="${hpMax}" disabled></div>
+          </div>
+          <div class="temp-hp-field">
+            <label>Временные ОЗ</label>
+            <input type="number" id="famHpTemp" value="${F.hp.temp||0}" style="width:90px;">
+          </div>
+          <div class="empty-hint" style="margin-top:8px;">Максимум: 5 × уровень хозяина.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header" data-collapse-toggle="defensesCollapsed" data-collapse-scope="familiar">
+          <h3>Защита</h3>
+          <svg class="chev ${!F.defensesCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        ${F.defensesCollapsed ? `
+        <div class="compact-panel compact-def">
+          <div class="compact-stat"><span class="k">КБ</span><span class="v">${F.ac}</span></div>
+          <div class="compact-stat"><span class="k">С</span><span class="v">${fmtMod(d.fort)}</span></div>
+          <div class="compact-stat"><span class="k">Р</span><span class="v">${fmtMod(d.ref)}</span></div>
+          <div class="compact-stat"><span class="k">В</span><span class="v">${fmtMod(d.will)}</span></div>
+        </div>` : ''}
+        <div class="card-body ${F.defensesCollapsed?'collapsed':''}">
+          <div class="field">
+            <label class="field-label">Класс доспеха</label>
+            ${isPlay() ? `<div class="def-box" style="padding:8px 10px;"><div class="def-val">${F.ac}</div></div>` : `<input type="number" id="famAc" value="${F.ac}">`}
+          </div>
+          <div class="compact-def compact-def-3" style="margin-top:8px;">
+            <div class="compact-stat"><span class="k">Стойкость</span><span class="v">${fmtMod(d.fort)}</span></div>
+            <div class="compact-stat"><span class="k">Реакция</span><span class="v">${fmtMod(d.ref)}</span></div>
+            <div class="compact-stat"><span class="k">Воля</span><span class="v">${fmtMod(d.will)}</span></div>
+          </div>
+          <div class="empty-hint" style="margin-top:8px;">Испытания как у хозяина. КБ задаётся отдельно — броня хозяина на фамильяра не переносится.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:10px;">Навыки</h3>
+        <div class="familiar-skill-grid">
+          <div class="compact-stat familiar-skill-stat">
+            <span class="k">Внимание, Акробатика, Скрытность</span>
+            <span class="v">${fmtMod(d.specialSkills)}</span>
+          </div>
+          <div class="compact-stat familiar-skill-stat">
+            <span class="k">Прочие навыки</span>
+            <span class="v">${fmtMod(d.otherSkills)}</span>
+          </div>
+        </div>
+        <div class="empty-hint" style="margin-top:8px;">Первая группа: уровень + наибольшее из 3 и модификатора заклинательной характеристики хозяина. Прочие равны уровню хозяина.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-header" data-collapse-toggle="statsCollapsed" data-collapse-scope="familiar">
+          <h3>Характеристики</h3>
+          <svg class="chev ${!F.statsCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        ${F.statsCollapsed ? `
+        <div class="compact-panel familiar-ability-grid">
+          ${statCols}
+        </div>` : ''}
+        <div class="card-body ${F.statsCollapsed?'collapsed':''}">
+          <div class="familiar-ability-grid">${statCols}</div>
+          <div class="empty-hint" style="margin-top:8px;">Модификаторы как у хозяина.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:10px;">Движение</h3>
+        ${isPlay() ? `
+        <div class="compact-speeds">
+          <div class="compact-stat"><span class="k">Наземная</span><span class="v">${F.speeds.base}</span></div>
+          ${(F.speeds.extra||[]).map(s=>`
+            <div class="compact-stat"><span class="k">${escapeHtml(s.name||'Скорость')}</span><span class="v">${escapeHtml(s.value || '—')}</span></div>
+          `).join('')}
+        </div>` : `
+        <div class="field speed-setup">
+          <label class="field-label">Наземная скорость (футы)</label>
+          <input type="number" id="famSpeedBase" class="speed-num" value="${F.speeds.base}">
+        </div>
+        ${F.speeds.extra.length ? `<div style="margin-top:4px;">${F.speeds.extra.map(s=>`
+          <div class="extra-speed-row">
+            <span>${escapeHtml(s.name)}${s.value ? ' — '+escapeHtml(s.value) : ''}</span>
+            <button data-fam-speed-del="${s.id}">✕</button>
+          </div>
+        `).join('')}</div>` : ''}
+        <button class="btn btn-sm" id="famAddSpeedBtn" style="margin-top:10px;">+ Доп. скорость</button>`}
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:8px;">Способности</h3>
+        ${!isPlay() ? `<button class="btn btn-accent btn-block" id="famAddAbilityBtn" style="margin-bottom:12px;">+ Добавить способность</button>` : ''}
+        ${abilityCards}
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:8px;">Связь</h3>
+        <div class="play-text">Эмпатическая связь до 1 мили: фамильяр делится эмоциями. Он не понимает языков и не говорит, пока способность не даст ему эту возможность.</div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-bottom:8px;">Заметки</h3>
+        ${isPlay()
+          ? (F.notes && F.notes.trim() ? `<div class="play-text">${escapeHtml(F.notes)}</div>` : `<div class="empty-hint">Нет заметок</div>`)
+          : `<textarea class="autosize" id="famNotes">${escapeHtml_(F.notes)}</textarea>`}
+      </div>
+    </div>
+  `;
+}
+
+function familiarAbilityFormHtml(ab){
+  ab = ab || {name:'', desc:''};
+  return `
+    <div class="field">
+      <label class="field-label">Название</label>
+      <input type="text" id="mfName" value="${escapeAttr(ab.name)}" placeholder="Из библиотеки или своё…">
+    </div>
+    <div class="tag-suggestions" id="mfFamAbilitySuggestions"></div>
+    <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(ab.desc)}</textarea></div>
+  `;
+}
+
+function wireFamiliarAbilitySuggestions(onPick){
+  const input = byId('mfName');
+  const box = byId('mfFamAbilitySuggestions');
+  if(!input || !box) return;
+  function render(){
+    const matches = searchLibraryFamiliarAbilities(input.value);
+    box.innerHTML = '';
+    matches.forEach(entry=>{
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'tag-suggestion';
+      option.innerHTML = `<span>${escapeHtml(entry.name)}</span><small>библиотека</small>`;
+      option.addEventListener('click', ()=>onPick(entry));
+      box.appendChild(option);
+    });
+  }
+  input.addEventListener('input', render);
+  input.addEventListener('focus', render);
+  render();
+}
+
+function wireFamiliarTab(){
+  const root = document.querySelector('.page.active');
+  wireCollapsibles(root);
+  wireListItemToggles(root);
+  const F = CH.familiar;
+  const d = familiarDerived();
+
+  const nameEl = byId('famName');
+  if(nameEl) nameEl.addEventListener('input', e=>{ F.name=e.target.value; save(); });
+  const kindEl = byId('famKind');
+  if(kindEl) kindEl.addEventListener('input', e=>{ F.kind=e.target.value; save(); });
+
+  const traitAddBtn = byId('famTraitAddBtn');
+  const traitInputEl = byId('famTraitInput');
+  const traitSuggestionsEl = byId('famTraitSuggestions');
+  function hasFamTrait(candidate){ return (F.traits||[]).some(trait=>traitKey(trait) === traitKey(candidate)); }
+  function renderFamTraitSuggestions(){
+    if(!traitSuggestionsEl || !traitInputEl) return;
+    const query = traitInputEl.value.trim().toLocaleLowerCase('ru');
+    const matches = query ? TRAIT_LIBRARY.filter(t=>t.name.toLocaleLowerCase('ru').includes(query) || t.category.toLocaleLowerCase('ru').includes(query)).slice(0,6) : [];
+    traitSuggestionsEl.innerHTML = '';
+    matches.forEach(trait=>{
+      const option = document.createElement('button');
+      option.type = 'button'; option.className = `tag-suggestion tone-${trait.color}`;
+      option.innerHTML = `<span>${escapeHtml(trait.name)}</span><small>${escapeHtml(trait.category)}</small>`;
+      option.addEventListener('click', ()=>{
+        if(!hasFamTrait({type:'library', id:trait.id})) F.traits.push({type:'library', id:trait.id});
+        save(); renderApp();
+      });
+      traitSuggestionsEl.appendChild(option);
+    });
+  }
+  if(traitAddBtn) traitAddBtn.addEventListener('click', ()=>{
+    const v = traitInputEl.value.trim();
+    const trait = {type:'custom', name:v};
+    if(v && !hasFamTrait(trait)){ F.traits.push(trait); save(); renderApp(); }
+  });
+  if(traitInputEl){
+    traitInputEl.addEventListener('input', renderFamTraitSuggestions);
+    traitInputEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); traitAddBtn.click(); } });
+  }
+  root.querySelectorAll('[data-fam-trait-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      F.traits.splice(Number(btn.dataset.famTraitDel),1);
+      save(); renderApp();
+    });
+  });
+
+  root.querySelectorAll('[data-fam-delta]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      applyFamiliarHpDelta(Number(btn.dataset.famDelta));
+    });
+  });
+  const hpCur = byId('famHpCurrent');
+  if(hpCur) hpCur.addEventListener('input', e=>{ F.hp.current = clamp(Number(e.target.value)||0, 0, d.hpMax); save(); renderApp(); });
+  const hpTemp = byId('famHpTemp');
+  if(hpTemp) hpTemp.addEventListener('input', e=>{ F.hp.temp = Math.max(0, Number(e.target.value)||0); save(); renderApp(); });
+
+  const acEl = byId('famAc');
+  if(acEl) acEl.addEventListener('input', e=>{ F.ac = Number(e.target.value)||0; save(); renderApp(); });
+
+  const speedEl = byId('famSpeedBase');
+  if(speedEl) speedEl.addEventListener('input', e=>{ F.speeds.base = Number(e.target.value)||0; save(); renderApp(); });
+  root.querySelectorAll('[data-fam-speed-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      F.speeds.extra = F.speeds.extra.filter(x=>x.id!==btn.dataset.famSpeedDel);
+      save(); renderApp();
+    });
+  });
+  const addSpeedBtn = byId('famAddSpeedBtn');
+  if(addSpeedBtn) addSpeedBtn.addEventListener('click', ()=>{
+    openModal('Дополнительная скорость', `
+      <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" placeholder="Полёт, Лазание, Плавание…"></div>
+      <div class="field"><label class="field-label">Значение</label><input type="text" id="mfValue" placeholder="30"></div>
+      <div class="modal-actions">
+        <button class="btn btn-block" id="mfCancel">Отмена</button>
+        <button class="btn btn-accent btn-block" id="mfSave">Добавить</button>
+      </div>
+    `, ()=>{
+      byId('mfCancel').addEventListener('click', closeModal);
+      byId('mfSave').addEventListener('click', ()=>{
+        const name = byId('mfName').value.trim();
+        if(!name) return;
+        F.speeds.extra.push({id:uid(), name, value:byId('mfValue').value.trim()});
+        save(); closeModal(); renderApp();
+      });
+    });
+  });
+
+  const addAbilityBtn = byId('famAddAbilityBtn');
+  if(addAbilityBtn) addAbilityBtn.addEventListener('click', ()=>{
+    openModal('Способность фамильяра', familiarAbilityFormHtml() + `
+      <div class="modal-actions">
+        <button class="btn btn-block" id="mfCancel">Отмена</button>
+        <button class="btn btn-accent btn-block" id="mfSave">Добавить</button>
+      </div>
+    `, ()=>{
+      let picked = null;
+      wireFamiliarAbilitySuggestions(entry=>{
+        picked = entry;
+        byId('mfName').value = entry.name;
+        byId('mfDesc').value = entry.desc;
+      });
+      byId('mfName').addEventListener('input', ()=>{ picked = null; });
+      byId('mfDesc').addEventListener('input', ()=>{ picked = null; });
+      byId('mfCancel').addEventListener('click', closeModal);
+      byId('mfSave').addEventListener('click', ()=>{
+        const name = byId('mfName').value.trim() || 'Без названия';
+        const desc = byId('mfDesc').value;
+        if(picked && picked.name === name && picked.desc === desc){
+          F.abilities.push(instantiateLibraryFamiliarAbility(picked, uid));
+        } else {
+          F.abilities.push({id:uid(), libraryId:null, name, desc});
+        }
+        save(); closeModal(); renderApp();
+      });
+    });
+  });
+  root.querySelectorAll('[data-edit-fam-ability]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const ab = F.abilities.find(x=>x.id===btn.dataset.editFamAbility);
+      if(!ab) return;
+      openModal('Изменить способность', familiarAbilityFormHtml(ab) + `
+        <div class="modal-actions">
+          <button class="btn btn-block" id="mfCancel">Отмена</button>
+          <button class="btn btn-accent btn-block" id="mfSave">Сохранить</button>
+        </div>
+      `, ()=>{
+      let pickedId = ab.libraryId || null;
+      wireFamiliarAbilitySuggestions(entry=>{
+        byId('mfName').value = entry.name;
+        byId('mfDesc').value = entry.desc;
+        pickedId = entry.id;
+      });
+      byId('mfName').addEventListener('input', ()=>{ pickedId = null; });
+      byId('mfDesc').addEventListener('input', ()=>{ pickedId = null; });
+      byId('mfCancel').addEventListener('click', closeModal);
+      byId('mfSave').addEventListener('click', ()=>{
+        ab.name = byId('mfName').value.trim() || 'Без названия';
+        ab.desc = byId('mfDesc').value;
+        const lib = pickedId ? getLibraryFamiliarAbility(pickedId) : null;
+        ab.libraryId = (lib && lib.name === ab.name && lib.desc === ab.desc) ? pickedId : null;
+        save(); closeModal(); renderApp();
+      });
+      });
+    });
+  });
+  root.querySelectorAll('[data-del-fam-ability]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      F.abilities = F.abilities.filter(x=>x.id!==btn.dataset.delFamAbility);
+      save(); renderApp();
+    });
+  });
+
+  const notesEl = byId('famNotes');
+  if(notesEl){
+    bindAutosize(notesEl);
+    notesEl.addEventListener('input', e=>{ F.notes=e.target.value; save(); });
+  }
+}
+
+function applyFamiliarHpDelta(delta){
+  const F = CH.familiar;
+  const max = familiarDerived().hpMax;
+  if(delta < 0){
+    let dmg = -delta;
+    if(F.hp.temp > 0){
+      const absorbed = Math.min(F.hp.temp, dmg);
+      F.hp.temp -= absorbed; dmg -= absorbed;
+    }
+    F.hp.current = clamp((Number(F.hp.current)||0) - dmg, 0, max);
+  } else {
+    F.hp.current = clamp((Number(F.hp.current)||0) + delta, 0, max);
+  }
+  save(); renderApp();
+}
+
+/* =========================================================================
+   НАСТРОЙКИ (бывшая вкладка «Ещё»)
+   ========================================================================= */
+function renderSettingsTab(){
   const savedDate = CH.meta.savedAt ? new Date(CH.meta.savedAt).toLocaleString('ru-RU') : '—';
   const profiles = listCharacterProfiles();
   return `
-    ${renderTopbar('Ещё', '')}
+    ${renderTopbar('Настройки', '', {settings:true})}
     <div class="page active">
+      <div class="card">
+        <div class="more-item" style="border:none;padding-top:0;">
+          <div><div class="t">Вкладка фамильяра</div><div class="d">Показать упрощённый лист связанного существа</div></div>
+          <label class="switch">
+            <input type="checkbox" id="familiarEnabledToggle" ${CH.familiarEnabled?'checked':''}>
+            <span class="switch-ui"></span>
+          </label>
+        </div>
+      </div>
       <div class="card">
         <div class="more-item" style="border:none;padding-top:0;">
           <div><div class="t">Персонаж в этой вкладке</div><div class="d">Каждая вкладка может работать со своим персонажем.</div></div>
@@ -2303,12 +2897,28 @@ function renderMoreTab(){
         <div class="more-item" style="border:none;padding-top:0;">
           <div><div class="t">Автосохранение</div><div class="d">Данные хранятся локально в кэше браузера. Последнее сохранение: ${savedDate}</div></div>
         </div>
+        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.1</div>
       </div>
     </div>
   `;
 }
 
-function wireMoreTab(){
+function wireSettingsTab(){
+  const famToggle = byId('familiarEnabledToggle');
+  if(famToggle) famToggle.addEventListener('change', ()=>{
+    const on = famToggle.checked;
+    CH.familiarEnabled = on;
+    if(on && !CH.familiar.ready){
+      const level = Number(CH.level)||1;
+      CH.familiar.hp.current = 5 * level;
+      CH.familiar.ready = true;
+      const compact = isPlay();
+      CH.familiar.hpCollapsed = compact;
+      CH.familiar.defensesCollapsed = compact;
+    }
+    save();
+    renderApp();
+  });
   byId('characterProfileSelect').addEventListener('change', e=>{
     CH = switchCharacterProfile(e.target.value);
     activeTab = 'character';

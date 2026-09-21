@@ -72,6 +72,23 @@ const BASIC_ACTIONS = [
   {name:'Первая помощь', type:'Одно действие', traits:'Манипуляция', desc:'Навык: Медицина (Неизученный)\nТребования: вы носите или держите инструменты лекаря.\n\nВы оказываете первую помощь существу рядом, которое при смерти или получает продолжительный урон от кровотечения. Если существо и истекает кровью, и при смерти, перед совершением проверки необходимо выбрать, что именно вы собираетесь лечить. Вы можете повторно оказать Первую помощь, чтобы устранить и второй эффект.\n\nОстановка кровотечения вы совершаете проверку Медицины, чтобы помочь существу, получающему продолжительный урон от кровотечения. СЛ обычно равна СЛ эффекта, вызвавшего кровотечение.\n\nСтабилизация вы совершаете проверку Медицины, чтобы помочь находящемуся при смерти существу с 0 ПЗ. СЛ проверки равна 5 + СЛ проверки восстановления существа (как правило, 15 + значение состояния при смерти).\n\nУспех: если вы пытались стабилизировать существо, оно теряет состояние при смерти (но остаётся без сознания). Если вы пытались остановить кровотечение, существо получает преимущество помощи в восстановлении, снижая СЛ за особенно эффективное занятие.\nКритический провал: если вы пытались стабилизировать существо, его значение состояния при смерти увеличивается на 1. Если вы пытались остановить кровотечение, существо немедленно получает урон, равный продолжительному урону от кровотечения.'},
 ];
 
+function defaultFamiliar(){
+  return {
+    name:'',
+    kind:'',
+    traits:[],
+    ac:10,
+    hp:{current:5, temp:0},
+    speeds:{base:25, extra:[]},
+    abilities:[],
+    notes:'',
+    ready:false,
+    hpCollapsed:false,
+    defensesCollapsed:false,
+    statsCollapsed:true,
+  };
+}
+
 function defaultCharacter(){
   return {
     meta:{ savedAt: Date.now() },
@@ -84,6 +101,9 @@ function defaultCharacter(){
     actionsAllCollapsed:false,
     spellSlotsCollapsed:false,
     preparedListCollapsed:false,
+    hpCollapsed:false,
+    defensesCollapsed:false,
+    perceptionCollapsed:false,
     descriptors:{ ancestry:'', heritage:'', background:'', alignment:'', deity:'', size:'Средний' },
     appearance:'', notes:'',
     abilitiesCollapsed:true,
@@ -126,6 +146,8 @@ function defaultCharacter(){
       spellbook: [], // {id,name,level,tradition,desc,traits}
     },
     feats: [], // {id,name,level,category,desc,traits}
+    familiarEnabled: false,
+    familiar: defaultFamiliar(),
   };
 }
 
@@ -299,6 +321,24 @@ function migrateBooks(books){
     spellbook: Array.isArray(books && books.spellbook) ? books.spellbook.map(spell=>Object.assign({}, spell, {traits:normalizeTraits(spell.traits)})) : [],
   });
 }
+function migrateFamiliar(raw){
+  const base = defaultFamiliar();
+  if(!raw || typeof raw !== 'object') return base;
+  return Object.assign(base, raw, {
+    traits: normalizeTraits(raw.traits),
+    hp: Object.assign({}, base.hp, raw.hp || {}),
+    speeds: Object.assign({}, base.speeds, raw.speeds || {}, {
+      extra: Array.isArray(raw.speeds && raw.speeds.extra) ? raw.speeds.extra : []
+    }),
+    abilities: Array.isArray(raw.abilities) ? raw.abilities.map(ability => Object.assign({
+      id: ability.id || uid(),
+      libraryId: ability.libraryId || null,
+      name: ability.name || '',
+      desc: ability.desc || '',
+    }, ability)) : [],
+  });
+}
+
 function migrateFeats(feats){
   if(!Array.isArray(feats)) return [];
   return feats.map(feat=>Object.assign({}, feat, {traits:normalizeTraits(feat.traits)}));
@@ -327,6 +367,11 @@ function normalizeCharacter(parsed){
     actions: migrateActions(parsed.actions) || defaultCharacter().actions,
     feats: migrateFeats(parsed.feats),
     skills: migrateSkills(parsed.skills) || defaultCharacter().skills,
+    hpCollapsed: parsed.hpCollapsed != null ? !!parsed.hpCollapsed : parsed.mode === 'play',
+    defensesCollapsed: parsed.defensesCollapsed != null ? !!parsed.defensesCollapsed : parsed.mode === 'play',
+    perceptionCollapsed: parsed.perceptionCollapsed != null ? !!parsed.perceptionCollapsed : parsed.mode === 'play',
+    familiarEnabled: !!parsed.familiarEnabled,
+    familiar: migrateFamiliar(parsed.familiar),
   });
 }
 
