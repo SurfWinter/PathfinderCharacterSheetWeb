@@ -139,7 +139,7 @@ function defaultCharacter(){
       slotsMax:{0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0},
       slotsUsed:{0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0},
       prepared:{}, // level -> [ {spellId|null, expended} ]
-      focus:{ spellIds:[], used:0 }, // фокальные заклинания: очки = кол-во заклинаний (макс 3)
+      focus:{ spellIds:[], used:0, max:1 }, // фокальные заклинания; max правится в настройке
     },
     books:{
       formulas: [], // {id,name,level,note}
@@ -321,6 +321,37 @@ function migrateBooks(books){
     spellbook: Array.isArray(books && books.spellbook) ? books.spellbook.map(spell=>Object.assign({}, spell, {traits:normalizeTraits(spell.traits)})) : [],
   });
 }
+function migrateSpellcasting(raw){
+  const base = defaultCharacter().spellcasting;
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const focusRaw = raw.focus && typeof raw.focus === 'object' ? raw.focus : {};
+  const spellIds = Array.isArray(focusRaw.spellIds) ? focusRaw.spellIds.filter(Boolean) : [];
+  const max = focusRaw.max != null
+    ? Math.max(0, Number(focusRaw.max) || 0)
+    : Math.max(1, spellIds.length);
+  const used = Math.max(0, Math.min(Number(focusRaw.used) || 0, max));
+  const slotsMax = Object.assign({}, base.slotsMax, raw.slotsMax || {});
+  const slotsUsed = Object.assign({}, base.slotsUsed, raw.slotsUsed || {});
+  const prepared = raw.prepared && typeof raw.prepared === 'object' ? raw.prepared : {};
+  const type = raw.type || base.type;
+  if(type === 'prepared'){
+    [1,2,3,4,5,6,7,8,9,10].forEach(lvl=>{
+      const slots = Array.isArray(prepared[lvl]) ? prepared[lvl] : [];
+      const expended = slots.filter(slot => slot && slot.spellId && slot.expended).length;
+      const maxSlots = Math.max(0, Number(slotsMax[lvl]) || 0);
+      slotsUsed[lvl] = Math.max(0, Math.min(expended, maxSlots));
+    });
+    const cantrips = Array.isArray(prepared[0]) ? prepared[0] : [];
+    cantrips.forEach(slot => { if(slot) slot.expended = false; });
+  }
+  return Object.assign({}, base, raw, {
+    slotsMax,
+    slotsUsed,
+    prepared,
+    focus: { spellIds, used, max },
+  });
+}
+
 function migrateFamiliar(raw){
   const base = defaultFamiliar();
   if(!raw || typeof raw !== 'object') return base;
@@ -361,9 +392,7 @@ function normalizeCharacter(parsed){
       extra: Array.isArray(parsed.speeds && parsed.speeds.extra) ? parsed.speeds.extra : []
     }),
     equipment: migrateEquipment(parsed.equipment),
-    spellcasting: Object.assign(defaultCharacter().spellcasting, parsed.spellcasting||{}, {
-      focus: Object.assign({spellIds:[], used:0}, (parsed.spellcasting && parsed.spellcasting.focus) || {})
-    }),
+    spellcasting: migrateSpellcasting(parsed.spellcasting),
     books: migrateBooks(parsed.books),
     traits: normalizeTraits(parsed.traits),
     languages: Array.isArray(parsed.languages) ? parsed.languages : [],

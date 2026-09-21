@@ -4,10 +4,13 @@ export function byId(id){
   return document.getElementById(id);
 }
 
-export function showToast(message){
+export function showToast(message, tone){
   const toast = byId('toast');
+  if(!toast) return;
   toast.textContent = message;
-  toast.classList.add('show');
+  toast.className = 'toast show' + (tone ? ' toast-' + tone : '');
   clearTimeout(showToast.timeoutId);
-  showToast.timeoutId = setTimeout(() => toast.classList.remove('show'), 1800);
+  showToast.timeoutId = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 1400);
 }
