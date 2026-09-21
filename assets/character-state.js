@@ -335,6 +335,9 @@ function migrateFamiliar(raw){
       libraryId: ability.libraryId || null,
       name: ability.name || '',
       desc: ability.desc || '',
+      effect: ability.effect || null,
+      skill: ability.skill || null,
+      damageTypes: Array.isArray(ability.damageTypes) ? ability.damageTypes.filter(Boolean).slice(0, 2) : null,
     }, ability)) : [],
   });
 }

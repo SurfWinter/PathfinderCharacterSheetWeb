@@ -207,6 +207,7 @@ body.settings-open .navbar{display:none;}
 .familiar-ability-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}
 .compact-def-3{grid-template-columns:repeat(3,minmax(0,1fr));}
 body.settings-open .toast{bottom:28px;}
+#mfExtraParams:not(:empty){margin:0 0 10px;}
 
 /* ---------- character tab ---------- */
 .name-input{font-size:19px;font-weight:600;padding:10px 12px;}

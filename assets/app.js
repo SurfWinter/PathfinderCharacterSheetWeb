@@ -2,7 +2,7 @@ import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterPr
 import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
-import { instantiateLibraryFamiliarAbility, getLibraryFamiliarAbility, searchLibraryFamiliarAbilities } from './libraries/familiar-abilities.js';
+import { instantiateLibraryFamiliarAbility, getLibraryFamiliarAbility, matchLibraryFamiliarAbility, searchLibraryFamiliarAbilities, DAMAGE_TYPES_RESISTANCE, SKILLED_EXCLUDED, hasFamiliarEffect, familiarAbilityEffect, skilledSkillsFromAbilities, resistanceFromAbilities } from './libraries/familiar-abilities.js';
 import { TRAIT_LIBRARY, getLibraryTrait } from './libraries/traits.js';
 import { instantiateLibraryRune, searchLibraryRunes } from './libraries/runes.js';
 import {
@@ -2419,15 +2419,22 @@ function familiarDerived(){
   const spellKey = (CH.spellcasting && CH.spellcasting.ability) || 'int';
   const spellMod = (CH.abilities[spellKey] && CH.abilities[spellKey].mod) || 0;
   const special = level + Math.max(3, spellMod);
+  const F = CH.familiar || {};
+  const abilities = F.abilities || [];
+  const tough = hasFamiliarEffect(abilities, 'tough');
   function saveTotal(key, abilityId){
     const d = CH.defenses[key];
     return CH.abilities[abilityId].mod + profTotal(d.proficiency, level) + Number(d.otherBonus||0);
   }
   return {
     level,
-    hpMax: 5 * level,
+    spellMod,
+    hpMax: (5 + (tough ? 2 : 0)) * level,
+    tough,
     specialSkills: special,
+    skilledSkills: skilledSkillsFromAbilities(abilities).map(name => ({name, total: level + spellMod})),
     otherSkills: level,
+    resistances: resistanceFromAbilities(abilities, level),
     fort: saveTotal('fort','con'),
     ref: saveTotal('ref','dex'),
     will: saveTotal('will','wis'),
@@ -2447,10 +2454,17 @@ function renderFamiliarTab(){
     ? F.traits.map((t,i)=>traitChipHtml(t, !isPlay() ? `<button type="button" data-fam-trait-del="${i}">✕</button>` : '')).join('')
     : '<div class="empty-hint" style="padding:6px 0;">Дескрипторов пока нет</div>';
 
-  const abilityCards = (F.abilities||[]).map(ab=>`
+  const abilityCards = (F.abilities||[]).map(ab=>{
+    const effect = familiarAbilityEffect(ab);
+    const meta = effect === 'skilled' && ab.skill
+      ? `<div class="tag">${escapeHtml(ab.skill)}</div>`
+      : effect === 'resistance' && (ab.damageTypes||[]).length
+        ? `<div class="tag">${escapeHtml((ab.damageTypes||[]).join(', '))}</div>`
+        : '';
+    return `
     <div class="list-item">
       <div class="list-item-head" data-item-toggle>
-        <div><div class="name">${escapeHtml(ab.name||'Без названия')}</div></div>
+        <div><div class="name">${escapeHtml(ab.name||'Без названия')}</div>${meta}</div>
       </div>
       <div class="list-item-body">
         <div>${escapeHtml(ab.desc)||'Без описания'}</div>
@@ -2461,7 +2475,8 @@ function renderFamiliarTab(){
         </div>` : ''}
       </div>
     </div>
-  `).join('') || '<div class="empty-hint">Способностей пока нет</div>';
+  `;
+  }).join('') || '<div class="empty-hint">Способностей пока нет</div>';
 
   const statCols = ABILITY_DEFS.map(def=>`
     <div class="compact-stat"><span class="k">${abilityShort(def.id)}</span><span class="v">${fmtMod(CH.abilities[def.id].mod)}</span></div>
@@ -2513,6 +2528,7 @@ function renderFamiliarTab(){
             <button class="btn hp-delta hp-plus" data-fam-delta="1">+1</button>
           </div>
           <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
+          ${d.resistances.types.length ? `<div class="tag-chip-box" style="margin-top:8px;margin-bottom:0;">${d.resistances.types.map(t=>`<span class="tag-chip resist">Устойчивость к ${escapeHtml(t)} ${d.resistances.value}</span>`).join('')}</div>` : ''}
         </div>` : ''}
         <div class="card-body ${F.hpCollapsed?'collapsed':''}">
           <div class="hp-main">
@@ -2534,7 +2550,8 @@ function renderFamiliarTab(){
             <label>Временные ОЗ</label>
             <input type="number" id="famHpTemp" value="${F.hp.temp||0}" style="width:90px;">
           </div>
-          <div class="empty-hint" style="margin-top:8px;">Максимум: 5 × уровень хозяина.</div>
+          <div class="empty-hint" style="margin-top:8px;">Максимум: ${d.tough ? '7' : '5'} × уровень хозяина${d.tough ? ' (живучий)' : ''}.</div>
+          ${d.resistances.types.length ? `<div class="tag-chip-box" style="margin-top:8px;margin-bottom:0;">${d.resistances.types.map(t=>`<span class="tag-chip resist">Устойчивость к ${escapeHtml(t)} ${d.resistances.value}</span>`).join('')}</div>` : ''}
         </div>
       </div>
 
@@ -2571,12 +2588,17 @@ function renderFamiliarTab(){
             <span class="k">Внимание, Акробатика, Скрытность</span>
             <span class="v">${fmtMod(d.specialSkills)}</span>
           </div>
+          ${d.skilledSkills.map(s=>`
+          <div class="compact-stat familiar-skill-stat">
+            <span class="k">${escapeHtml(s.name)}</span>
+            <span class="v">${fmtMod(s.total)}</span>
+          </div>`).join('')}
           <div class="compact-stat familiar-skill-stat">
             <span class="k">Прочие навыки</span>
             <span class="v">${fmtMod(d.otherSkills)}</span>
           </div>
         </div>
-        <div class="empty-hint" style="margin-top:8px;">Первая группа: уровень + наибольшее из 3 и модификатора заклинательной характеристики хозяина. Прочие равны уровню хозяина.</div>
+        <div class="empty-hint" style="margin-top:8px;">Внимание / Акробатика / Скрытность: уровень + наибольшее из 3 и модификатора заклинательной характеристики. Умелец: уровень + этот модификатор. Прочие равны уровню хозяина.</div>
       </div>
 
       <div class="card">
@@ -2637,16 +2659,110 @@ function renderFamiliarTab(){
   `;
 }
 
+function familiarSkilledOptions(){
+  const seen = new Set();
+  const names = [];
+  (CH.skills || []).forEach(skill => {
+    const name = String(skill.name || '').trim();
+    const key = name.toLocaleLowerCase('ru');
+    if(!name || SKILLED_EXCLUDED.includes(key) || seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  });
+  return names;
+}
+
+function familiarAbilityExtraHtml(effect, ab){
+  ab = ab || {};
+  if(effect === 'skilled'){
+    const current = ab.skill || '';
+    const opts = familiarSkilledOptions().map(name =>
+      `<option value="${escapeAttr(name)}" ${name===current?'selected':''}>${escapeHtml(name)}</option>`
+    ).join('');
+    return `
+      <div class="field" id="mfExtraInner">
+        <label class="field-label">Навык умельца</label>
+        <select id="mfSkilledSkill"><option value="">Выберите навык</option>${opts}</select>
+        <div class="empty-hint" style="text-align:left;padding:6px 0 0;">Кроме Акробатики и Скрытности. Можно взять несколько раз.</div>
+      </div>`;
+  }
+  if(effect === 'resistance'){
+    const types = ab.damageTypes || [];
+    function opts(selected){
+      return DAMAGE_TYPES_RESISTANCE.map(t=>
+        `<option value="${escapeAttr(t.name)}" ${t.name===selected?'selected':''}>${escapeHtml(t.name)}</option>`
+      ).join('');
+    }
+    return `
+      <div id="mfExtraInner">
+        <div class="row2">
+          <div class="field"><label class="field-label">Тип урона 1</label><select id="mfResistType1"><option value="">—</option>${opts(types[0]||'')}</select></div>
+          <div class="field"><label class="field-label">Тип урона 2</label><select id="mfResistType2"><option value="">—</option>${opts(types[1]||'')}</select></div>
+        </div>
+      </div>`;
+  }
+  return '';
+}
+
 function familiarAbilityFormHtml(ab){
-  ab = ab || {name:'', desc:''};
+  ab = ab || {name:'', desc:'', effect:null, skill:null, damageTypes:null};
+  const effect = familiarAbilityEffect(ab);
   return `
     <div class="field">
       <label class="field-label">Название</label>
       <input type="text" id="mfName" value="${escapeAttr(ab.name)}" placeholder="Из библиотеки или своё…">
     </div>
     <div class="tag-suggestions" id="mfFamAbilitySuggestions"></div>
+    <div id="mfExtraParams">${familiarAbilityExtraHtml(effect, ab)}</div>
     <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(ab.desc)}</textarea></div>
   `;
+}
+
+function syncFamiliarAbilityExtras(entry, current){
+  const box = byId('mfExtraParams');
+  if(!box) return;
+  box.innerHTML = familiarAbilityExtraHtml(entry && entry.effect, current || {});
+}
+
+function readFamiliarAbilityExtras(){
+  const skillEl = byId('mfSkilledSkill');
+  const t1 = byId('mfResistType1');
+  const t2 = byId('mfResistType2');
+  const skill = skillEl ? skillEl.value.trim() : '';
+  const types = [];
+  if(t1 && t1.value) types.push(t1.value);
+  if(t2 && t2.value) types.push(t2.value);
+  return {
+    skill: skill || null,
+    damageTypes: types.length ? types : null,
+  };
+}
+
+function validateFamiliarAbilityExtras(effect, extras){
+  if(effect === 'skilled' && !extras.skill){
+    showToast('Выберите навык для умельца');
+    return false;
+  }
+  if(effect === 'resistance'){
+    const types = extras.damageTypes || [];
+    if(types.length < 2 || types[0] === types[1]){
+      showToast('Выберите два разных типа урона');
+      return false;
+    }
+  }
+  return true;
+}
+
+function withFamiliarHpAdjust(mutate){
+  const F = CH.familiar;
+  const before = familiarDerived().hpMax;
+  mutate();
+  const after = familiarDerived().hpMax;
+  if(after > before){
+    F.hp.current = clamp((Number(F.hp.current)||0) + (after - before), 0, after);
+  } else if(after < before){
+    F.hp.current = clamp(Number(F.hp.current)||0, 0, after);
+  }
 }
 
 function wireFamiliarAbilitySuggestions(onPick){
@@ -2660,7 +2776,8 @@ function wireFamiliarAbilitySuggestions(onPick){
       const option = document.createElement('button');
       option.type = 'button';
       option.className = 'tag-suggestion';
-      option.innerHTML = `<span>${escapeHtml(entry.name)}</span><small>библиотека</small>`;
+      const mark = entry.effect ? 'эффект' : 'библиотека';
+      option.innerHTML = `<span>${escapeHtml(entry.name)}</span><small>${mark}</small>`;
       option.addEventListener('click', ()=>onPick(entry));
       box.appendChild(option);
     });
@@ -2769,22 +2886,34 @@ function wireFamiliarTab(){
       </div>
     `, ()=>{
       let picked = null;
-      wireFamiliarAbilitySuggestions(entry=>{
+      function applyPick(entry){
         picked = entry;
         byId('mfName').value = entry.name;
         byId('mfDesc').value = entry.desc;
+        syncFamiliarAbilityExtras(entry);
+      }
+      wireFamiliarAbilitySuggestions(applyPick);
+      byId('mfName').addEventListener('input', ()=>{
+        picked = matchLibraryFamiliarAbility(byId('mfName').value);
+        syncFamiliarAbilityExtras(picked);
       });
-      byId('mfName').addEventListener('input', ()=>{ picked = null; });
-      byId('mfDesc').addEventListener('input', ()=>{ picked = null; });
       byId('mfCancel').addEventListener('click', closeModal);
       byId('mfSave').addEventListener('click', ()=>{
         const name = byId('mfName').value.trim() || 'Без названия';
         const desc = byId('mfDesc').value;
-        if(picked && picked.name === name && picked.desc === desc){
-          F.abilities.push(instantiateLibraryFamiliarAbility(picked, uid));
-        } else {
-          F.abilities.push({id:uid(), libraryId:null, name, desc});
-        }
+        const lib = picked || matchLibraryFamiliarAbility(name);
+        const extras = readFamiliarAbilityExtras();
+        if(lib && !validateFamiliarAbilityExtras(lib.effect, extras)) return;
+        withFamiliarHpAdjust(()=>{
+          if(lib){
+            const inst = instantiateLibraryFamiliarAbility(lib, uid, extras);
+            inst.name = name;
+            inst.desc = desc;
+            F.abilities.push(inst);
+          } else {
+            F.abilities.push({id:uid(), libraryId:null, name, desc, effect:null, skill:null, damageTypes:null});
+          }
+        });
         save(); closeModal(); renderApp();
       });
     });
@@ -2800,29 +2929,51 @@ function wireFamiliarTab(){
           <button class="btn btn-accent btn-block" id="mfSave">Сохранить</button>
         </div>
       `, ()=>{
-      let pickedId = ab.libraryId || null;
-      wireFamiliarAbilitySuggestions(entry=>{
-        byId('mfName').value = entry.name;
-        byId('mfDesc').value = entry.desc;
-        pickedId = entry.id;
-      });
-      byId('mfName').addEventListener('input', ()=>{ pickedId = null; });
-      byId('mfDesc').addEventListener('input', ()=>{ pickedId = null; });
-      byId('mfCancel').addEventListener('click', closeModal);
-      byId('mfSave').addEventListener('click', ()=>{
-        ab.name = byId('mfName').value.trim() || 'Без названия';
-        ab.desc = byId('mfDesc').value;
-        const lib = pickedId ? getLibraryFamiliarAbility(pickedId) : null;
-        ab.libraryId = (lib && lib.name === ab.name && lib.desc === ab.desc) ? pickedId : null;
-        save(); closeModal(); renderApp();
-      });
+        let picked = ab.libraryId ? getLibraryFamiliarAbility(ab.libraryId) : matchLibraryFamiliarAbility(ab.name);
+        function applyPick(entry){
+          picked = entry;
+          byId('mfName').value = entry.name;
+          byId('mfDesc').value = entry.desc;
+          syncFamiliarAbilityExtras(entry, ab);
+        }
+        wireFamiliarAbilitySuggestions(applyPick);
+        byId('mfName').addEventListener('input', ()=>{
+          picked = matchLibraryFamiliarAbility(byId('mfName').value);
+          syncFamiliarAbilityExtras(picked, ab);
+        });
+        byId('mfCancel').addEventListener('click', closeModal);
+        byId('mfSave').addEventListener('click', ()=>{
+          const name = byId('mfName').value.trim() || 'Без названия';
+          const desc = byId('mfDesc').value;
+          const lib = picked || matchLibraryFamiliarAbility(name);
+          const extras = readFamiliarAbilityExtras();
+          if(lib && !validateFamiliarAbilityExtras(lib.effect, extras)) return;
+          withFamiliarHpAdjust(()=>{
+            ab.name = name;
+            ab.desc = desc;
+            if(lib){
+              ab.libraryId = lib.id;
+              ab.effect = lib.effect || null;
+              ab.skill = extras.skill;
+              ab.damageTypes = extras.damageTypes;
+            } else {
+              ab.libraryId = null;
+              ab.effect = null;
+              ab.skill = null;
+              ab.damageTypes = null;
+            }
+          });
+          save(); closeModal(); renderApp();
+        });
       });
     });
   });
   root.querySelectorAll('[data-del-fam-ability]').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      F.abilities = F.abilities.filter(x=>x.id!==btn.dataset.delFamAbility);
+      withFamiliarHpAdjust(()=>{
+        F.abilities = F.abilities.filter(x=>x.id!==btn.dataset.delFamAbility);
+      });
       save(); renderApp();
     });
   });

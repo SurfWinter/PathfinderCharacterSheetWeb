@@ -680,8 +680,20 @@ function instantiateLibraryRune(entry, makeId){
 
 
 /* libraries/familiar-abilities.js */
-// Способности фамильяра. Без дескрипторов: id, name, desc.
-// На персонаже хранится копия {id, libraryId, name, desc}. libraryId = null у своих записей.
+// Способности фамильяра / любимца.
+// На персонаже: {id, libraryId, name, desc, effect, skill, damageTypes}.
+// effect: null | 'tough' | 'skilled' | 'resistance' | 'greaterResistance'
+
+const DAMAGE_TYPES_RESISTANCE = [
+  {id:'sonic', name:'звук'},
+  {id:'acid', name:'кислота'},
+  {id:'fire', name:'огонь'},
+  {id:'cold', name:'холод'},
+  {id:'electricity', name:'электричество'},
+  {id:'poison', name:'яд'},
+];
+
+const SKILLED_EXCLUDED = ['акробатика', 'скрытность'];
 
 const FAMILIAR_ABILITY_LIBRARY = [
   {
@@ -689,28 +701,334 @@ const FAMILIAR_ABILITY_LIBRARY = [
     name: 'Аккомпаниатор',
     desc: 'Фамильяр содействует вашему исполнению. Когда вы совершаете проверку Исполнения, если ваш фамильяр поблизости и может действовать, он будет аккомпанировать вам трелями, хлопками или даже на собственном миниатюрном инструменте. Вы получаете ситуативный бонус +1 или +2, если вы мастер Исполнения.',
   },
+  {
+    id: 'amphibious',
+    name: 'Амфибия',
+    desc: 'Любимец получает дескриптор «амфибия», что позволяет ему дышать как под водой, так и в воздухе. Кроме того, у него есть как наземная скорость, так и скорость плавания; обе равны наивысшему значению из двух.',
+  },
+  {
+    id: 'fast-movement',
+    name: 'Быстрое перемещение',
+    desc: 'Одна из скоростей любимца увеличивается с 25 до 40 футов.',
+  },
+  {
+    id: 'tough',
+    name: 'Живучий',
+    effect: 'tough',
+    desc: 'Максимальные ПЗ вашего любимца увеличиваются на 2 за уровень.',
+  },
+  {
+    id: 'climb',
+    name: 'Лазание',
+    desc: 'Любимец получает скорость лазания 25 футов.',
+  },
+  {
+    id: 'manual-dexterity',
+    name: 'Мелкая моторика',
+    desc: 'Любимец может использовать до двух своих конечностей для совершения действий с дескриптором «манипуляция», как если бы это были руки.',
+  },
+  {
+    id: 'darkvision',
+    name: 'Ночное зрение',
+    desc: 'Любимец получает ночное зрение.',
+  },
+  {
+    id: 'scent',
+    name: 'Нюх',
+    desc: 'Любимец получает нюх (вспомогательный) 30 футов.',
+  },
+  {
+    id: 'fly',
+    name: 'Полёт',
+    desc: 'Любимец получает скорость полёта 25 футов.',
+  },
+  {
+    id: 'burrow',
+    name: 'Рытьё',
+    desc: 'Любимец получает скорость рытья 5 футов и может рыть норы маленького размера.',
+  },
+  {
+    id: 'echolocation',
+    name: 'Эхолокация',
+    desc: 'Слух вашего любимца становится точным способом восприятия в пределах 20 футов.',
+  },
+  {
+    id: 'alchemical-stomach',
+    name: 'Алхимический желудок',
+    desc: 'Ваш фамильяр может действовать как перегонный куб для сгущения бомб, проглотив бомбу, которую требуется обработать, что требует двух действий Взаимодействия от него и одного от вас. Спустя 1 минуту фамильяр отрыгивает концентрированный предмет. Если фамильяр попытается дистиллировать бомбу, чей уровень превышает ваш собственный −1, он вместо этого получает урон, как если бы в него успешно попали этой бомбой.',
+  },
+  {
+    id: 'second-opinion',
+    name: 'Альтернативное мнение',
+    desc: 'Ваш фамильяр служит вам научным советником. Несмотря на то, что он обладает дескриптором «подручный», в начале каждого своего хода фамильяр получает 1 ответное действие, которое может потратить только на Помощь вам в проверке навыка, сделанной, чтобы Вспомнить информацию; при этом у фамильяра должна быть взята способность умелец для соответствующего навыка и он, как обычно, должен сперва подготовиться к совершению Помощи товарищу. Благодаря этой способности он автоматически успешно проходит проверку для Помощи (или критически успешно, если вы мастер в этом навыке). Эту способность можно выбрать лишь в случае, если фамильяр обладает способностью умелец.',
+  },
+  {
+    id: 'greater-resistance',
+    name: 'Высшая устойчивость',
+    effect: 'greaterResistance',
+    desc: 'Устойчивость, получаемая от способности фамильяра устойчивость, увеличивается до значения вашего уровня. Эту способность можно выбрать лишь в случае, если вы достигли 8 уровня.',
+  },
+  {
+    id: 'fungus',
+    name: 'Гриб',
+    desc: 'У вашего фамильяра дескриптор «гриб» вместо дескриптора «животное».',
+  },
+  {
+    id: 'item-delivery',
+    name: 'Доставка предмета',
+    desc: 'Если ваш фамильяр рядом с вами, вы можете отдать Команду принести предмет. Вместо 2 обычных действий ваш фамильяр совершает Взаимодействие — берёт предмет лёгкого или меньшего веса, который вы держите, совершает одно действие с дескриптором «движение» и, наконец, Взаимодействием передаёт предмет другому согласному существу. Вместо последнего Взаимодействия фамильяр может применить предмет к существу, если на это нужно не более 1 действия и это предмет подходящего типа (например, алхимический эликсир). Если фамильяр не достигает цели в этот ход, он продолжает держать предмет, пока не получит иного приказа. Эту способность можно выбрать лишь в случае, если фамильяр обладает способностью мелкая моторика.',
+  },
+  {
+    id: 'dragon',
+    name: 'Дракон',
+    desc: 'У вашего фамильяра дескриптор «дракон» вместо дескриптора «животное».',
+  },
+  {
+    id: 'poison-reservoir',
+    name: 'Ёмкость с ядом',
+    desc: 'У вашего фамильяра есть ёмкость с ядом, благодаря чему он может нанести яд с дескриптором «рана» на обнажённое оружие союзника рядом с собой, совершив Взаимодействие. Вы всё ещё должны наполнить ёмкость ядом, приобретя яд и потратив два последовательных Взаимодействия.\nЭту способность можно выбрать лишь в случае, если у вас есть фамильяр-гомункул.',
+  },
+  {
+    id: 'spell',
+    name: 'Заклинание',
+    desc: 'Выберите заклинание из вашего репертуара либо из подготовленных в этот день заклинаний. Круг заклинания должен быть хотя бы на 5 ниже наивысшего доступного вам круга ячейки. Фамильяр может сотворить это заклинание один раз в день, используя вашу магическую традицию, модификатор атаки заклинанием и СЛ заклинаний. Если заклинание обладает вредоносным эффектом, влияющим на заклинателя, он действует и на вас, и на фамильяра. Эту способность можно выбрать лишь в случае, если вы можете творить заклинания 6 круга с помощью ячеек.',
+  },
+  {
+    id: 'damage-avoidance',
+    name: 'Защита от урона',
+    desc: 'Выберите одно из испытаний. Фамильяр не получает урона при успехе в испытании выбранного типа; эта способность защищает только от урона, но не от прочих эффектов.',
+  },
+  {
+    id: 'construct',
+    name: 'Конструкция',
+    desc: 'У вашего фамильяра дескриптор «конструкция» вместо дескриптора «животное». Он невосприимчив к состояниям: эффектам с дескриптором «смерть», болезнь, обречённость, истощение, утомление, исцеление, несмертельные атаки, паралич, яд, тошнота, дух, без сознания, жизнь, и пустота. Эту способность можно выбрать лишь в случае, если фамильяр обладает способностью живучий.',
+  },
+  {
+    id: 'independent',
+    name: 'Независимый',
+    desc: 'Если вы не отдаёте вашему фамильяру Команду животному во время сцены, он всё ещё получает 1 действие каждый раунд. Обычно вы всё ещё должны выбирать, как он потратит это действие, но ведущий может решить, что ваш фамильяр действует в соответствии с собственной тактикой, а не вашими пожеланиями. Эффект не действует совместно со способностью прислужник и схожими способностями, требующими Команды животному, если вы способны ехать верхом на фамильяре, или в схожих ситуациях.',
+  },
+  {
+    id: 'toolbelt',
+    name: 'Носитель инструментов',
+    desc: 'Ваш фамильяр может нести набор инструментов лёгкого или незначительного веса. Пока ваш фамильяр рядом с вами, вы можете выхватить и вернуть их на место в качестве части действия, которое их использует, как если бы носили их. Эту способность можно выбрать лишь в случае, если фамильяр обладает способностью мелкая моторика.',
+  },
+  {
+    id: 'valet',
+    name: 'Прислужник',
+    desc: 'Ваш фамильяр более эффективно выполняет ваши команды принести предмет. Он не использует 2 действия немедленно после того, как вы отдали команду, — вместо этого вы можете до двух раз до конца вашего хода приказать ему совершить Взаимодействие, чтобы достать предмет лёгкого или незначительного веса, который вы носите, и поместить его в одну из ваших свободных рук. Фамильяр не может использовать эту способность, чтобы доставать убранные предметы. Если у вашего фамильяра другое количество действий, после команды он может достать по одному предмету за каждое действие.',
+  },
+  {
+    id: 'play-dead',
+    name: 'Притвориться мёртвым',
+    desc: 'Ваш фамильяр притворяется неодушевлённым, скрывая свои сверхъестественные способности. Он может Спрятаться без какого-либо укрытия или других необходимых условий от существ, которые не осознают, что он живой. Это возможно при условии, что фамильяр находится в месте, где его присутствие не выглядело бы неуместным. Если проверка успешна, наблюдатели всё ещё видят его, но ошибочно принимают за неодушевлённый предмет. После того как их обманули один раз, они понимают, что ваш фамильяр живой, и он больше не может Спрятаться от них таким способом.',
+  },
+  {
+    id: 'speak-with-kind',
+    name: 'Разговор с сородичами',
+    desc: 'Фамильяр может понимать животных своего вида и общаться с ними. Эту способность можно выбрать лишь в случае, если вы достигли 6 уровня, а ваш фамильяр — животное и обладает способностью речь.',
+  },
+  {
+    id: 'plant',
+    name: 'Растение',
+    desc: 'У вашего фамильяра дескриптор «растение» вместо дескриптора «животное».',
+  },
+  {
+    id: 'speech',
+    name: 'Речь',
+    desc: 'Фамильяр понимает один из известных вам языков и может на нём говорить.',
+  },
+  {
+    id: 'partner-in-crime',
+    name: 'Соучастник',
+    desc: 'Фамильяр служит вам преступным сообщником. Хотя фамильяр является подручным, он получает 1 ответное действие в начале каждого своего хода, но может потратить его только на Помощь товарищу (только вам) в проверке Воровства или Обмана (он всё ещё должен подготовиться к оказанию помощи, как обычно). Его проверка для такой Помощи товарищу автоматически успешна (или критически успешна, если вы умелы в соответствующем навыке на мастерском уровне).',
+  },
+  {
+    id: 'focused-rejuvenation',
+    name: 'Сфокусированное восстановление',
+    desc: 'Когда вы совершаете Фокусировку, вы источаете магическую энергию, исцеляющую вашего фамильяра. Ваш фамильяр восстанавливает по 1 ПЗ за уровень при каждой вашей Фокусировке.',
+  },
+  {
+    id: 'touch-telepathy',
+    name: 'Телепатическое касание',
+    desc: 'Ваш фамильяр умеет телепатически общаться с вами посредством касания. Если он обладает способностью речь, он также может телепатически общаться посредством касания с любым существом, с которым у него есть общий язык.',
+  },
+  {
+    id: 'skilled',
+    name: 'Умелец',
+    effect: 'skilled',
+    repeatable: true,
+    desc: 'Выберите один навык, кроме Акробатики или Скрытности. Модификатор этого навыка вашего фамильяра равен не просто вашему уровню, а вашему уровню + ваш модификатор заклинательной характеристики. Эту способность можно выбрать несколько раз, каждый раз для нового навыка.',
+  },
+  {
+    id: 'versatile-form',
+    name: 'Универсальная форма',
+    desc: 'Созданное тело вашего фамильяра позволяет вам при необходимости вносить в него изменения. Один раз в день вы можете потратить 10 минут, чтобы изменить одну способность фамильяра или способность хозяина, которой обладает ваш фамильяр. Чтобы выбрать эту способность, ваш фамильяр должен быть конструкцией, а навык Ремесло должен быть изучен вами.',
+  },
+  {
+    id: 'resistance',
+    name: 'Устойчивость',
+    effect: 'resistance',
+    desc: 'Выберите два типа урона из следующего списка: звук, кислота, огонь, холод, электричество, яд. Ваш фамильяр получает устойчивость к этим типам урона, равную половине вашего уровня (минимум 1).',
+  },
+  {
+    id: 'plant-form',
+    name: 'Форма растения',
+    desc: 'Ваш фамильяр может сменить облик в качестве одиночного действия, превращаясь в растение маленького размера и типа, отдалённо похожего на фамильяра. В остальном эффект аналогичен слиянию с растениями. Эту способность можно выбрать лишь в случае, если у фамильяра есть дескриптор «растение».',
+  },
+  {
+    id: 'master-form',
+    name: 'Форма хозяина',
+    desc: 'Ваш фамильяр может сменить облик в качестве одиночного действия, превращаясь в гуманоида вашего народа, однако сохраняет возраст, пол и примерное телосложение истинной формы. Кроме того, он всегда будет обладать очевидно неестественной чертой внешности: например, кошачьими зрачками или змеиным языком. Форма всегда остаётся одной и той же при каждом использовании этой способности. В остальном эффект аналогичен форме гуманоида, но фамильяр лишь выглядит гуманоидом и не получает новых возможностей. Эту способность можно выбрать лишь в случае, если фамильяр обладает способностями мелкая моторика и речь.',
+  },
+  {
+    id: 'elemental',
+    name: 'Элементаль',
+    desc: 'У вашего фамильяра дескриптор «элементаль» вместо дескриптора «животное». Выберите дескриптор воздух, земля, огонь, металл, вода, или дерево. Ваш фамильяр получает этот дескриптор. Он невосприимчив к кровотечению, параличу, сну и ядам, а также соответствующему дескриптору. Эту способность можно выбрать лишь в случае, если фамильяр обладает способностью устойчивость.',
+  },
+  {
+    id: 'familiar-recall',
+    name: 'Возвращение фамильяра',
+    desc: 'Один раз в день вы можете использовать занятие на 3 действия с дескриптором «концентрация», чтобы телепортировать своего фамильяра в ваше пространство. Для этого фамильяр должен быть в пределах 1 мили. Это эффект телепортации.',
+  },
+  {
+    id: 'extra-alchemy',
+    name: 'Дополнительная алхимия',
+    desc: 'Фамильяр помогает вам подготавливать алхимические предметы в начале дня. Используя продвинутую алхимию во время вашей ежедневной подготовки, вы можете создать один дополнительный предмет. Эту способность можно выбрать лишь в случае, если у вас есть способность продвинутая алхимия.',
+  },
+  {
+    id: 'extra-reagent',
+    name: 'Дополнительная пробирка',
+    desc: 'В теле вашего фамильяра постепенно скапливаются алхимические жидкости. Раз в день, когда ваш фамильяр рядом с вами, вы можете совершить Взаимодействие для того, чтобы получить универсальную пробирку. Эту способность можно выбрать лишь в случае, если у вас есть способность универсальные пробирки.',
+  },
+  {
+    id: 'spell-delivery',
+    name: 'Доставка заклинаний',
+    desc: 'Если фамильяр в вашем пространстве, вы можете сотворить заклинание с дистанцией «касание», передать его фамильяру и приказать ему доставить заклинание к цели. После этого фамильяр использует 2 своих действия в раунд, чтобы переместиться к выбранной вам цели и коснуться её. Если он не успеет добраться до цели в течение этого хода, заклинание не подействует.',
+  },
+  {
+    id: 'extra-spell-slot',
+    name: 'Запасное заклинание',
+    desc: 'Вы получаете одну дополнительную ячейку заклинания, круг которой должен быть как минимум на 3 ниже, чем наивысший круг ваших ячеек заклинаний. Эту способность хозяина можно выбрать лишь в случае, если вы можете творить заклинания 4 круга с помощью ячеек.',
+  },
+  {
+    id: 'extra-focus',
+    name: 'Запасной фокус',
+    desc: 'Вы можете подготовить дополнительный фокус или, если у вас есть репертуар заклинаний, вместо этого выбрать фокус, который будет добавляться в ваш репертуар заклинаний всякий раз, когда вы будете брать эту способность; вы можете пройти переподготовку для замены фокуса, но больше никак изменить его не сможете. Эту способность можно выбрать лишь в случае, если вы можете подготавливать фокусы или добавлять их в свой репертуар заклинаний.',
+  },
+  {
+    id: 'healing-familiar',
+    name: 'Исцеляющий фамильяр',
+    desc: 'Один раз в день ваш фамильяр может использовать 2 действия с дескриптором «концентрация», чтобы исцелить вас, отдав часть своей энергии. Для этого он должен быть в вашем пространстве. Вы восстанавливаете по 1d8 ПЗ за каждые два ваших уровня (минимум 1d8).',
+  },
+  {
+    id: 'share-senses',
+    name: 'Общее восприятие',
+    desc: 'Один раз в 10 минут вы можете использовать одиночное действие с дескриптором «концентрация», чтобы воспринимать происходящее через фамильяра. При этом вы теряете восприятие собственного тела, но зато можете воспринимать всё через тело фамильяра вплоть до 1 минуты. Вы можете использовать Прекращение для этого эффекта.',
+  },
+  {
+    id: 'familiar-concealment',
+    name: 'Поглощение фамильяра',
+    desc: 'Ваш фамильяр может превратиться в метку на вашей коже — родимое пятно, татуировку или иную отметину, отдалённо напоминающую его обычный облик. После превращения фамильяр не может действовать (кроме превращения в обычную форму). На него не действуют эффекты с областью. Его нужно выбирать целью отдельно, для чего нужно знать, что метка — это существо. Это означает, что вы и ваши союзники можете исцелять фамильяра или помогать ему, а большинству врагов будет неведома его истинная природа. Существа должны успешно пройти проверку Внимания со СЛ 20 для Поиска, чтобы понять, что это фамильяр. Он всё ещё может эмпатически общаться. Для превращения фамильяра из одной формы в другую требуется занятие на 1 минуту с дескриптором «концентрация».',
+  },
+  {
+    id: 'innate-surge',
+    name: 'Прилив врождённых сил',
+    desc: 'Один раз в день вы можете восполнить свои запасы магии с помощью врождённой магии фамильяра. Вы можете сотворить одно врождённое заклинание, полученное от черты народа, которое уже использовали в этот день. При этом вы всё равно должны применить занятие Сотворение заклинания и выполнить прочие требования заклинания.',
+  },
+  {
+    id: 'kindling',
+    name: 'Растопка',
+    desc: 'Вы можете предать тело вашего фамильяра огню для всплеска силы. Один раз в день в качестве свободного действия, когда вы Сотворяете заклинание с дескриптором «огонь», которое наносит урон и не имеет длительности, вы можете пожертвовать своим фамильяром для усиления заклинания. Ваш фамильяр немедленно погибает, что даёт этому заклинанию бонус состояния к урону, равный его удвоенному кругу.',
+  },
+  {
+    id: 'familiar-focus',
+    name: 'Сила фамильяра',
+    desc: 'Один раз в день ваш фамильяр может использовать 2 действия с дескриптором «концентрация», чтобы восстановить вам 1 ФП, но не выше вашего максимума. Эту способность можно выбрать лишь в случае, если у вас есть запас ФП.',
+  },
+  {
+    id: 'lifelink',
+    name: 'Узы жизни',
+    desc: 'Если после получения урона ПЗ вашего фамильяра снижаются до 0, вы можете совершить ответное действие с дескриптором «концентрация», чтобы принять этот урон на себя. В этом случае вы получаете весь урон, а фамильяр не получает его. Тем не менее все особые эффекты при нанесении урона по фамильяру (например, змеиный яд) действуют на него.',
+  },
 ];
 
 function getLibraryFamiliarAbility(id){
   return FAMILIAR_ABILITY_LIBRARY.find(entry => entry.id === id) || null;
 }
 
+function matchLibraryFamiliarAbility(name){
+  const q = String(name || '').trim().toLocaleLowerCase('ru');
+  if(!q) return null;
+  return FAMILIAR_ABILITY_LIBRARY.find(entry => entry.name.toLocaleLowerCase('ru') === q) || null;
+}
+
 function searchLibraryFamiliarAbilities(query){
   const q = String(query || '').trim().toLocaleLowerCase('ru');
-  if(!q) return FAMILIAR_ABILITY_LIBRARY.slice(0, 8);
+  if(!q) return FAMILIAR_ABILITY_LIBRARY.slice(0, 12);
   return FAMILIAR_ABILITY_LIBRARY.filter(entry =>
     entry.name.toLocaleLowerCase('ru').includes(q) ||
     entry.desc.toLocaleLowerCase('ru').includes(q)
-  ).slice(0, 8);
+  ).slice(0, 12);
 }
 
-function instantiateLibraryFamiliarAbility(entry, makeId){
+function instantiateLibraryFamiliarAbility(entry, makeId, extras){
+  extras = extras || {};
   return {
     id: makeId(),
     libraryId: entry.id,
     name: entry.name,
     desc: entry.desc,
+    effect: entry.effect || null,
+    skill: extras.skill || null,
+    damageTypes: extras.damageTypes || null,
   };
+}
+
+function familiarAbilityEffect(ability){
+  if(!ability) return null;
+  if(ability.effect) return ability.effect;
+  const lib = ability.libraryId ? getLibraryFamiliarAbility(ability.libraryId) : null;
+  return (lib && lib.effect) || null;
+}
+
+function hasFamiliarEffect(abilities, effect){
+  return (abilities || []).some(ability => familiarAbilityEffect(ability) === effect);
+}
+
+function skilledSkillsFromAbilities(abilities){
+  const seen = new Set();
+  const list = [];
+  (abilities || []).forEach(ability => {
+    if(familiarAbilityEffect(ability) !== 'skilled') return;
+    const name = String(ability.skill || '').trim();
+    const key = name.toLocaleLowerCase('ru');
+    if(!name || seen.has(key)) return;
+    seen.add(key);
+    list.push(name);
+  });
+  return list;
+}
+
+function resistanceFromAbilities(abilities, level){
+  const hasResistance = hasFamiliarEffect(abilities, 'resistance');
+  const hasGreater = hasFamiliarEffect(abilities, 'greaterResistance');
+  if(!hasResistance) return {types: [], value: 0, greater: hasGreater};
+  const types = [];
+  const seen = new Set();
+  (abilities || []).forEach(ability => {
+    if(familiarAbilityEffect(ability) !== 'resistance') return;
+    (ability.damageTypes || []).forEach(type => {
+      const name = String(type || '').trim();
+      const key = name.toLocaleLowerCase('ru');
+      if(!name || seen.has(key)) return;
+      seen.add(key);
+      types.push(name);
+    });
+  });
+  const lvl = Number(level)||1;
+  const value = hasGreater ? lvl : Math.max(1, Math.floor(lvl / 2));
+  return {types, value, greater: hasGreater};
 }
 
 
@@ -1051,6 +1369,9 @@ function migrateFamiliar(raw){
       libraryId: ability.libraryId || null,
       name: ability.name || '',
       desc: ability.desc || '',
+      effect: ability.effect || null,
+      skill: ability.skill || null,
+      damageTypes: Array.isArray(ability.damageTypes) ? ability.damageTypes.filter(Boolean).slice(0, 2) : null,
     }, ability)) : [],
   });
 }
@@ -3696,15 +4017,22 @@ function familiarDerived(){
   const spellKey = (CH.spellcasting && CH.spellcasting.ability) || 'int';
   const spellMod = (CH.abilities[spellKey] && CH.abilities[spellKey].mod) || 0;
   const special = level + Math.max(3, spellMod);
+  const F = CH.familiar || {};
+  const abilities = F.abilities || [];
+  const tough = hasFamiliarEffect(abilities, 'tough');
   function saveTotal(key, abilityId){
     const d = CH.defenses[key];
     return CH.abilities[abilityId].mod + profTotal(d.proficiency, level) + Number(d.otherBonus||0);
   }
   return {
     level,
-    hpMax: 5 * level,
+    spellMod,
+    hpMax: (5 + (tough ? 2 : 0)) * level,
+    tough,
     specialSkills: special,
+    skilledSkills: skilledSkillsFromAbilities(abilities).map(name => ({name, total: level + spellMod})),
     otherSkills: level,
+    resistances: resistanceFromAbilities(abilities, level),
     fort: saveTotal('fort','con'),
     ref: saveTotal('ref','dex'),
     will: saveTotal('will','wis'),
@@ -3724,10 +4052,17 @@ function renderFamiliarTab(){
     ? F.traits.map((t,i)=>traitChipHtml(t, !isPlay() ? `<button type="button" data-fam-trait-del="${i}">✕</button>` : '')).join('')
     : '<div class="empty-hint" style="padding:6px 0;">Дескрипторов пока нет</div>';
 
-  const abilityCards = (F.abilities||[]).map(ab=>`
+  const abilityCards = (F.abilities||[]).map(ab=>{
+    const effect = familiarAbilityEffect(ab);
+    const meta = effect === 'skilled' && ab.skill
+      ? `<div class="tag">${escapeHtml(ab.skill)}</div>`
+      : effect === 'resistance' && (ab.damageTypes||[]).length
+        ? `<div class="tag">${escapeHtml((ab.damageTypes||[]).join(', '))}</div>`
+        : '';
+    return `
     <div class="list-item">
       <div class="list-item-head" data-item-toggle>
-        <div><div class="name">${escapeHtml(ab.name||'Без названия')}</div></div>
+        <div><div class="name">${escapeHtml(ab.name||'Без названия')}</div>${meta}</div>
       </div>
       <div class="list-item-body">
         <div>${escapeHtml(ab.desc)||'Без описания'}</div>
@@ -3738,7 +4073,8 @@ function renderFamiliarTab(){
         </div>` : ''}
       </div>
     </div>
-  `).join('') || '<div class="empty-hint">Способностей пока нет</div>';
+  `;
+  }).join('') || '<div class="empty-hint">Способностей пока нет</div>';
 
   const statCols = ABILITY_DEFS.map(def=>`
     <div class="compact-stat"><span class="k">${abilityShort(def.id)}</span><span class="v">${fmtMod(CH.abilities[def.id].mod)}</span></div>
@@ -3790,6 +4126,7 @@ function renderFamiliarTab(){
             <button class="btn hp-delta hp-plus" data-fam-delta="1">+1</button>
           </div>
           <div class="hp-bar"><div class="hp-bar-fill" style="width:${hpPct}%"></div><div class="hp-bar-temp" style="width:${tempPct}%;left:${hpPct}%"></div></div>
+          ${d.resistances.types.length ? `<div class="tag-chip-box" style="margin-top:8px;margin-bottom:0;">${d.resistances.types.map(t=>`<span class="tag-chip resist">Устойчивость к ${escapeHtml(t)} ${d.resistances.value}</span>`).join('')}</div>` : ''}
         </div>` : ''}
         <div class="card-body ${F.hpCollapsed?'collapsed':''}">
           <div class="hp-main">
@@ -3811,7 +4148,8 @@ function renderFamiliarTab(){
             <label>Временные ОЗ</label>
             <input type="number" id="famHpTemp" value="${F.hp.temp||0}" style="width:90px;">
           </div>
-          <div class="empty-hint" style="margin-top:8px;">Максимум: 5 × уровень хозяина.</div>
+          <div class="empty-hint" style="margin-top:8px;">Максимум: ${d.tough ? '7' : '5'} × уровень хозяина${d.tough ? ' (живучий)' : ''}.</div>
+          ${d.resistances.types.length ? `<div class="tag-chip-box" style="margin-top:8px;margin-bottom:0;">${d.resistances.types.map(t=>`<span class="tag-chip resist">Устойчивость к ${escapeHtml(t)} ${d.resistances.value}</span>`).join('')}</div>` : ''}
         </div>
       </div>
 
@@ -3848,12 +4186,17 @@ function renderFamiliarTab(){
             <span class="k">Внимание, Акробатика, Скрытность</span>
             <span class="v">${fmtMod(d.specialSkills)}</span>
           </div>
+          ${d.skilledSkills.map(s=>`
+          <div class="compact-stat familiar-skill-stat">
+            <span class="k">${escapeHtml(s.name)}</span>
+            <span class="v">${fmtMod(s.total)}</span>
+          </div>`).join('')}
           <div class="compact-stat familiar-skill-stat">
             <span class="k">Прочие навыки</span>
             <span class="v">${fmtMod(d.otherSkills)}</span>
           </div>
         </div>
-        <div class="empty-hint" style="margin-top:8px;">Первая группа: уровень + наибольшее из 3 и модификатора заклинательной характеристики хозяина. Прочие равны уровню хозяина.</div>
+        <div class="empty-hint" style="margin-top:8px;">Внимание / Акробатика / Скрытность: уровень + наибольшее из 3 и модификатора заклинательной характеристики. Умелец: уровень + этот модификатор. Прочие равны уровню хозяина.</div>
       </div>
 
       <div class="card">
@@ -3914,16 +4257,110 @@ function renderFamiliarTab(){
   `;
 }
 
+function familiarSkilledOptions(){
+  const seen = new Set();
+  const names = [];
+  (CH.skills || []).forEach(skill => {
+    const name = String(skill.name || '').trim();
+    const key = name.toLocaleLowerCase('ru');
+    if(!name || SKILLED_EXCLUDED.includes(key) || seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  });
+  return names;
+}
+
+function familiarAbilityExtraHtml(effect, ab){
+  ab = ab || {};
+  if(effect === 'skilled'){
+    const current = ab.skill || '';
+    const opts = familiarSkilledOptions().map(name =>
+      `<option value="${escapeAttr(name)}" ${name===current?'selected':''}>${escapeHtml(name)}</option>`
+    ).join('');
+    return `
+      <div class="field" id="mfExtraInner">
+        <label class="field-label">Навык умельца</label>
+        <select id="mfSkilledSkill"><option value="">Выберите навык</option>${opts}</select>
+        <div class="empty-hint" style="text-align:left;padding:6px 0 0;">Кроме Акробатики и Скрытности. Можно взять несколько раз.</div>
+      </div>`;
+  }
+  if(effect === 'resistance'){
+    const types = ab.damageTypes || [];
+    function opts(selected){
+      return DAMAGE_TYPES_RESISTANCE.map(t=>
+        `<option value="${escapeAttr(t.name)}" ${t.name===selected?'selected':''}>${escapeHtml(t.name)}</option>`
+      ).join('');
+    }
+    return `
+      <div id="mfExtraInner">
+        <div class="row2">
+          <div class="field"><label class="field-label">Тип урона 1</label><select id="mfResistType1"><option value="">—</option>${opts(types[0]||'')}</select></div>
+          <div class="field"><label class="field-label">Тип урона 2</label><select id="mfResistType2"><option value="">—</option>${opts(types[1]||'')}</select></div>
+        </div>
+      </div>`;
+  }
+  return '';
+}
+
 function familiarAbilityFormHtml(ab){
-  ab = ab || {name:'', desc:''};
+  ab = ab || {name:'', desc:'', effect:null, skill:null, damageTypes:null};
+  const effect = familiarAbilityEffect(ab);
   return `
     <div class="field">
       <label class="field-label">Название</label>
       <input type="text" id="mfName" value="${escapeAttr(ab.name)}" placeholder="Из библиотеки или своё…">
     </div>
     <div class="tag-suggestions" id="mfFamAbilitySuggestions"></div>
+    <div id="mfExtraParams">${familiarAbilityExtraHtml(effect, ab)}</div>
     <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(ab.desc)}</textarea></div>
   `;
+}
+
+function syncFamiliarAbilityExtras(entry, current){
+  const box = byId('mfExtraParams');
+  if(!box) return;
+  box.innerHTML = familiarAbilityExtraHtml(entry && entry.effect, current || {});
+}
+
+function readFamiliarAbilityExtras(){
+  const skillEl = byId('mfSkilledSkill');
+  const t1 = byId('mfResistType1');
+  const t2 = byId('mfResistType2');
+  const skill = skillEl ? skillEl.value.trim() : '';
+  const types = [];
+  if(t1 && t1.value) types.push(t1.value);
+  if(t2 && t2.value) types.push(t2.value);
+  return {
+    skill: skill || null,
+    damageTypes: types.length ? types : null,
+  };
+}
+
+function validateFamiliarAbilityExtras(effect, extras){
+  if(effect === 'skilled' && !extras.skill){
+    showToast('Выберите навык для умельца');
+    return false;
+  }
+  if(effect === 'resistance'){
+    const types = extras.damageTypes || [];
+    if(types.length < 2 || types[0] === types[1]){
+      showToast('Выберите два разных типа урона');
+      return false;
+    }
+  }
+  return true;
+}
+
+function withFamiliarHpAdjust(mutate){
+  const F = CH.familiar;
+  const before = familiarDerived().hpMax;
+  mutate();
+  const after = familiarDerived().hpMax;
+  if(after > before){
+    F.hp.current = clamp((Number(F.hp.current)||0) + (after - before), 0, after);
+  } else if(after < before){
+    F.hp.current = clamp(Number(F.hp.current)||0, 0, after);
+  }
 }
 
 function wireFamiliarAbilitySuggestions(onPick){
@@ -3937,7 +4374,8 @@ function wireFamiliarAbilitySuggestions(onPick){
       const option = document.createElement('button');
       option.type = 'button';
       option.className = 'tag-suggestion';
-      option.innerHTML = `<span>${escapeHtml(entry.name)}</span><small>библиотека</small>`;
+      const mark = entry.effect ? 'эффект' : 'библиотека';
+      option.innerHTML = `<span>${escapeHtml(entry.name)}</span><small>${mark}</small>`;
       option.addEventListener('click', ()=>onPick(entry));
       box.appendChild(option);
     });
@@ -4046,22 +4484,34 @@ function wireFamiliarTab(){
       </div>
     `, ()=>{
       let picked = null;
-      wireFamiliarAbilitySuggestions(entry=>{
+      function applyPick(entry){
         picked = entry;
         byId('mfName').value = entry.name;
         byId('mfDesc').value = entry.desc;
+        syncFamiliarAbilityExtras(entry);
+      }
+      wireFamiliarAbilitySuggestions(applyPick);
+      byId('mfName').addEventListener('input', ()=>{
+        picked = matchLibraryFamiliarAbility(byId('mfName').value);
+        syncFamiliarAbilityExtras(picked);
       });
-      byId('mfName').addEventListener('input', ()=>{ picked = null; });
-      byId('mfDesc').addEventListener('input', ()=>{ picked = null; });
       byId('mfCancel').addEventListener('click', closeModal);
       byId('mfSave').addEventListener('click', ()=>{
         const name = byId('mfName').value.trim() || 'Без названия';
         const desc = byId('mfDesc').value;
-        if(picked && picked.name === name && picked.desc === desc){
-          F.abilities.push(instantiateLibraryFamiliarAbility(picked, uid));
-        } else {
-          F.abilities.push({id:uid(), libraryId:null, name, desc});
-        }
+        const lib = picked || matchLibraryFamiliarAbility(name);
+        const extras = readFamiliarAbilityExtras();
+        if(lib && !validateFamiliarAbilityExtras(lib.effect, extras)) return;
+        withFamiliarHpAdjust(()=>{
+          if(lib){
+            const inst = instantiateLibraryFamiliarAbility(lib, uid, extras);
+            inst.name = name;
+            inst.desc = desc;
+            F.abilities.push(inst);
+          } else {
+            F.abilities.push({id:uid(), libraryId:null, name, desc, effect:null, skill:null, damageTypes:null});
+          }
+        });
         save(); closeModal(); renderApp();
       });
     });
@@ -4077,29 +4527,51 @@ function wireFamiliarTab(){
           <button class="btn btn-accent btn-block" id="mfSave">Сохранить</button>
         </div>
       `, ()=>{
-      let pickedId = ab.libraryId || null;
-      wireFamiliarAbilitySuggestions(entry=>{
-        byId('mfName').value = entry.name;
-        byId('mfDesc').value = entry.desc;
-        pickedId = entry.id;
-      });
-      byId('mfName').addEventListener('input', ()=>{ pickedId = null; });
-      byId('mfDesc').addEventListener('input', ()=>{ pickedId = null; });
-      byId('mfCancel').addEventListener('click', closeModal);
-      byId('mfSave').addEventListener('click', ()=>{
-        ab.name = byId('mfName').value.trim() || 'Без названия';
-        ab.desc = byId('mfDesc').value;
-        const lib = pickedId ? getLibraryFamiliarAbility(pickedId) : null;
-        ab.libraryId = (lib && lib.name === ab.name && lib.desc === ab.desc) ? pickedId : null;
-        save(); closeModal(); renderApp();
-      });
+        let picked = ab.libraryId ? getLibraryFamiliarAbility(ab.libraryId) : matchLibraryFamiliarAbility(ab.name);
+        function applyPick(entry){
+          picked = entry;
+          byId('mfName').value = entry.name;
+          byId('mfDesc').value = entry.desc;
+          syncFamiliarAbilityExtras(entry, ab);
+        }
+        wireFamiliarAbilitySuggestions(applyPick);
+        byId('mfName').addEventListener('input', ()=>{
+          picked = matchLibraryFamiliarAbility(byId('mfName').value);
+          syncFamiliarAbilityExtras(picked, ab);
+        });
+        byId('mfCancel').addEventListener('click', closeModal);
+        byId('mfSave').addEventListener('click', ()=>{
+          const name = byId('mfName').value.trim() || 'Без названия';
+          const desc = byId('mfDesc').value;
+          const lib = picked || matchLibraryFamiliarAbility(name);
+          const extras = readFamiliarAbilityExtras();
+          if(lib && !validateFamiliarAbilityExtras(lib.effect, extras)) return;
+          withFamiliarHpAdjust(()=>{
+            ab.name = name;
+            ab.desc = desc;
+            if(lib){
+              ab.libraryId = lib.id;
+              ab.effect = lib.effect || null;
+              ab.skill = extras.skill;
+              ab.damageTypes = extras.damageTypes;
+            } else {
+              ab.libraryId = null;
+              ab.effect = null;
+              ab.skill = null;
+              ab.damageTypes = null;
+            }
+          });
+          save(); closeModal(); renderApp();
+        });
       });
     });
   });
   root.querySelectorAll('[data-del-fam-ability]').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      F.abilities = F.abilities.filter(x=>x.id!==btn.dataset.delFamAbility);
+      withFamiliarHpAdjust(()=>{
+        F.abilities = F.abilities.filter(x=>x.id!==btn.dataset.delFamAbility);
+      });
       save(); renderApp();
     });
   });
