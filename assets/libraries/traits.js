@@ -149,3 +149,64 @@ export function matchLibraryTrait(name){
   if(aliasId) return traitsById.get(aliasId) || null;
   return traitsByName.get(key) || null;
 }
+
+function traitNameOf(trait){
+  if(!trait) return '';
+  if(trait.type === 'library'){
+    const lib = getLibraryTrait(trait.id);
+    return lib ? lib.name : String(trait.id || '');
+  }
+  if(typeof trait === 'string') return trait;
+  return trait.name || '';
+}
+
+function traitMatchesId(trait, id){
+  if(!trait) return false;
+  if(trait.type === 'library' && trait.id === id) return true;
+  const lib = getLibraryTrait(id);
+  const names = new Set([String(id).toLocaleLowerCase('ru')]);
+  if(lib) names.add(lib.name.toLocaleLowerCase('ru'));
+  return names.has(traitNameOf(trait).trim().toLocaleLowerCase('ru'));
+}
+
+export function spellHasTrait(spell, traitId){
+  return !!(spell && Array.isArray(spell.traits) && spell.traits.some(trait => traitMatchesId(trait, traitId)));
+}
+
+export function spellHasCantripTrait(spell){
+  return spellHasTrait(spell, 'cantrip');
+}
+
+export function spellHasFocusTrait(spell){
+  return spellHasTrait(spell, 'focus');
+}
+
+export function isAutoHeightenSpell(spell){
+  return spellHasCantripTrait(spell) || spellHasFocusTrait(spell);
+}
+
+export function autoHeightenRank(characterLevel){
+  return Math.max(1, Math.ceil(Math.max(1, Number(characterLevel) || 1) / 2));
+}
+
+export function spellDisplayRank(spell, characterLevel){
+  if(isAutoHeightenSpell(spell)) return autoHeightenRank(characterLevel);
+  return Math.max(0, Number(spell && spell.level) || 0);
+}
+
+export function spellFitsPreparedSlot(spell, slotLevel){
+  if(!spell) return false;
+  const slot = Number(slotLevel);
+  const hasCantrip = spellHasCantripTrait(spell);
+  const hasFocus = spellHasFocusTrait(spell);
+  if(hasCantrip && hasFocus) return false;
+  if(slot === 0) return hasCantrip;
+  if(hasCantrip || hasFocus) return false;
+  const rank = Number(spell.level) || 0;
+  return rank >= 1 && rank <= slot;
+}
+
+export function spellFitsFocusList(spell){
+  if(!spell) return false;
+  return spellHasFocusTrait(spell) && !spellHasCantripTrait(spell);
+}

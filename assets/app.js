@@ -1,9 +1,9 @@
-import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterProfiles, loadCharacter, normalizeCharacter, saveCharacter, switchCharacterProfile, uid } from './character-state.js';
+import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterProfiles, loadCharacter, normalizeCharacter, sanitizeSpellAssignments, saveCharacter, switchCharacterProfile, uid } from './character-state.js';
 import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
 import { instantiateLibraryFamiliarAbility, getLibraryFamiliarAbility, matchLibraryFamiliarAbility, searchLibraryFamiliarAbilities, DAMAGE_TYPES_RESISTANCE, SKILLED_EXCLUDED, hasFamiliarEffect, familiarAbilityEffect, skilledSkillsFromAbilities, resistanceFromAbilities } from './libraries/familiar-abilities.js';
-import { TRAIT_LIBRARY, getLibraryTrait, matchLibraryTrait } from './libraries/traits.js';
+import { TRAIT_LIBRARY, autoHeightenRank, getLibraryTrait, isAutoHeightenSpell, matchLibraryTrait, spellDisplayRank, spellFitsFocusList, spellFitsPreparedSlot, spellHasCantripTrait, spellHasFocusTrait } from './libraries/traits.js';
 import { instantiateLibraryRune, searchLibraryRunes } from './libraries/runes.js';
 import {
   ITEM_CATEGORY_LABELS,
@@ -163,6 +163,22 @@ function onEl(el, ev, fn){
 function rankLabel(lvl){
   lvl = Number(lvl);
   return lvl === 0 ? 'Заговоры' : (lvl + ' круг');
+}
+function preparedGroupLabel(lvl){
+  lvl = Number(lvl);
+  if(lvl === 0) return 'Заговоры · ' + autoHeightenRank(CH.level) + ' круг';
+  return rankLabel(lvl);
+}
+function spellOptionLabel(spell){
+  const rank = spellDisplayRank(spell, CH.level);
+  if(spellHasCantripTrait(spell) && !spellHasFocusTrait(spell)) return `${spell.name} (фокус · ${rank} круг)`;
+  if(spellHasFocusTrait(spell) && !spellHasCantripTrait(spell)) return `${spell.name} (фокальное · ${rank} круг)`;
+  return `${spell.name} (${rank === 0 ? '0 круг' : rank + ' круг'})`;
+}
+function spellRankText(spell){
+  const rank = spellDisplayRank(spell, CH.level);
+  if(isAutoHeightenSpell(spell)) return rank + ' круг';
+  return rank === 0 ? '0 круг' : rank + ' круг';
 }
 function rankToast(lvl){
   lvl = Number(lvl);
@@ -1086,7 +1102,7 @@ function traitChipHtml(trait, extraHtml=''){
   return `<span class="tag-chip tone-${view.color}">${escapeHtml(view.name)}${extraHtml}</span>`;
 }
 
-function createTagEditor(initialTags){
+function createTagEditor(initialTags, opts={}){
   const wrap = document.createElement('div');
   wrap.className = 'tag-editor';
   const chipBox = document.createElement('div');
@@ -1105,6 +1121,9 @@ function createTagEditor(initialTags){
   wrap.appendChild(suggestions);
 
   let tags = (initialTags||[]).slice();
+  function emit(){
+    if(typeof opts.onChange === 'function') opts.onChange(tags.slice());
+  }
   function renderChips(){
     chipBox.innerHTML = '';
     if(tags.length === 0){
@@ -1119,7 +1138,7 @@ function createTagEditor(initialTags){
       chip.appendChild(document.createTextNode(view.name));
       const x = document.createElement('button');
       x.type = 'button'; x.textContent = '✕';
-      x.addEventListener('click', ()=>{ tags.splice(i,1); renderChips(); });
+      x.addEventListener('click', ()=>{ tags.splice(i,1); renderChips(); emit(); });
       chip.appendChild(x);
       chipBox.appendChild(chip);
     });
@@ -1140,7 +1159,7 @@ function createTagEditor(initialTags){
   function addLibraryTag(trait){
     const tag = {type:'library', id:trait.id};
     if(!hasTag(tag)) tags.push(tag);
-    input.value=''; renderSuggestions(); renderChips(); input.focus();
+    input.value=''; renderSuggestions(); renderChips(); emit(); input.focus();
   }
   function addTag(){
     const v = input.value.trim();
@@ -1148,7 +1167,7 @@ function createTagEditor(initialTags){
     const library = matchLibraryTrait(v);
     const tag = library ? {type:'library', id:library.id} : {type:'custom', name:v};
     if(!hasTag(tag)) tags.push(tag);
-    input.value=''; renderSuggestions(); renderChips(); input.focus();
+    input.value=''; renderSuggestions(); renderChips(); emit(); input.focus();
   }
   addBtn.addEventListener('click', addTag);
   input.addEventListener('input', renderSuggestions);
@@ -2383,12 +2402,16 @@ function preparedCardHtml(lvl, idx, slot){
   if(!sp) return '';
   const canSpend = Number(lvl) >= 1;
   const spent = canSpend && slot.expended;
+  const castRank = Number(lvl) === 0 ? autoHeightenRank(CH.level) : Number(lvl);
+  const extra = Number(lvl) === 0
+    ? `${castRank} круг`
+    : `Ячейка ${idx+1}${Number(sp.level) < castRank ? ' · усилено до ' + castRank : ''}`;
   return `
     <div class="list-item ${spent ? 'spent' : ''}">
       <div class="list-item-head">
         <div ${canSpend ? `data-prep-cast="${lvl}|${idx}" style="flex:1;min-width:0;cursor:pointer;"` : 'style="flex:1;min-width:0;"'}>
           <div class="name">${escapeHtml(sp.name)}</div>
-          <div class="tag">Ячейка ${idx+1}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>
+          <div class="tag">${escapeHtml(extra)}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>
           ${tagsMetaHtml(sp.traits)}
         </div>
         ${canSpend ? `<button type="button" class="spent-badge" data-prep-cast="${lvl}|${idx}">${spent ? 'потрачено' : 'готово'}</button>` : ''}
@@ -2430,10 +2453,10 @@ function renderSpellsTab(){
   if(sc.type === 'spontaneous'){
     castingBody = dotsBody;
   } else if(sc.type === 'prepared'){
-    const bookOptions = (current)=>{
+    const bookOptions = (slotLvl, current)=>{
       let o = `<option value="" ${!current?'selected':''}>— пусто —</option>`;
-      CH.books.spellbook.forEach(sp=>{
-        o += `<option value="${sp.id}" ${current===sp.id?'selected':''}>${escapeHtml(sp.name)} (ур.${sp.level})</option>`;
+      CH.books.spellbook.filter(sp => spellFitsPreparedSlot(sp, slotLvl)).forEach(sp=>{
+        o += `<option value="${sp.id}" ${current===sp.id?'selected':''}>${escapeHtml(spellOptionLabel(sp))}</option>`;
       });
       return o;
     };
@@ -2442,9 +2465,9 @@ function renderSpellsTab(){
       const boxes = slots.map((slot,idx)=>`
         <div class="slot-box">
           <div>Ячейка ${idx+1}</div>
-          <select data-prep-slot="${lvl}|${idx}">${bookOptions(slot.spellId)}</select>
+          <select data-prep-slot="${lvl}|${idx}">${bookOptions(lvl, slot.spellId)}</select>
         </div>`).join('');
-      return `<div style="margin-bottom:14px;"><div class="field-label" style="margin-bottom:6px;">${rankLabel(lvl)}</div><div class="slot-grid">${boxes}</div></div>`;
+      return `<div style="margin-bottom:14px;"><div class="field-label" style="margin-bottom:6px;">${preparedGroupLabel(lvl)}</div><div class="slot-grid">${boxes}</div></div>`;
     }).join('') || '<div class="empty-hint">Настройте ячейки выше</div>';
   }
 
@@ -2457,7 +2480,7 @@ function renderSpellsTab(){
     preparedCardsHtml = SPELL_LEVELS.filter(l=>Number(sc.slotsMax[l])>0).map(lvl=>{
       const cards = (sc.prepared[lvl] || []).map((slot,idx)=>preparedCardHtml(lvl, idx, slot)).join('');
       if(!cards.trim()) return '';
-      return `<div style="margin-bottom:12px;"><div class="field-label" style="margin-bottom:6px;">${rankLabel(lvl)}</div>${cards}</div>`;
+      return `<div style="margin-bottom:12px;"><div class="field-label" style="margin-bottom:6px;">${preparedGroupLabel(lvl)}</div>${cards}</div>`;
     }).join('');
     if(!preparedCardsHtml.trim()) preparedCardsHtml = '<div class="empty-hint">Нет подготовленных заклинаний — заполните ячейки в режиме настройки</div>';
   }
@@ -2468,7 +2491,7 @@ function renderSpellsTab(){
     return `
     <div class="list-item">
       <div class="list-item-head">
-        <div style="flex:1;min-width:0;"><div class="name">${escapeHtml(sp.name)}</div><div class="tag">Уровень ${sp.level}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
+        <div style="flex:1;min-width:0;"><div class="name">${escapeHtml(sp.name)}</div><div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
         <button type="button" class="chev-btn" data-item-toggle aria-label="Описание">
           <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
         </button>
@@ -2480,15 +2503,16 @@ function renderSpellsTab(){
     </div>`;
   }).join('') || '<div class="empty-hint">Нет фокальных заклинаний — добавьте в режиме настройки</div>';
 
-  const focusAddOptions = CH.books.spellbook.filter(sp=>!focus.spellIds.includes(sp.id));
+  const focusAddOptions = CH.books.spellbook.filter(sp=>spellFitsFocusList(sp) && !focus.spellIds.includes(sp.id));
   let focusAddHtml = '';
   if(!isPlay()){
+    const focusCandidates = CH.books.spellbook.filter(spellFitsFocusList);
     focusAddHtml = focusAddOptions.length ? `
       <div class="tag-input-row" style="margin-top:10px;">
-        <select id="focusAddSelect">${focusAddOptions.map(sp=>`<option value="${sp.id}">${escapeHtml(sp.name)} (ур.${sp.level})</option>`).join('')}</select>
+        <select id="focusAddSelect">${focusAddOptions.map(sp=>`<option value="${sp.id}">${escapeHtml(spellOptionLabel(sp))}</option>`).join('')}</select>
         <button class="btn btn-sm btn-accent" id="focusAddBtn">+</button>
       </div>
-    ` : `<div class="empty-hint" style="padding:6px 0;">${CH.books.spellbook.length ? 'Все заклинания книги уже добавлены' : 'Сначала добавьте заклинания в Книгу заклинаний'}</div>`;
+    ` : `<div class="empty-hint" style="padding:6px 0;">${focusCandidates.length ? 'Все фокальные заклинания уже добавлены' : (CH.books.spellbook.length ? 'В книге нет заклинаний с дескриптором «фокальное»' : 'Сначала добавьте заклинания в Книгу заклинаний')}</div>`;
   }
 
   return `
@@ -2549,8 +2573,8 @@ function renderSpellsTab(){
       </div>` : ''}
 
       <div class="card">
-        <h3 style="margin-bottom:8px;">Фокальные заклинания</h3>
-        ${isPlay() ? '' : `<div class="ability-hint">Очки фокуса задаются отдельно от числа известных фокальных заклинаний.</div>
+        <h3 style="margin-bottom:8px;">Фокальные заклинания · ${autoHeightenRank(CH.level)} круг</h3>
+        ${isPlay() ? '' : `<div class="ability-hint">Круг равен половине уровня персонажа с округлением вверх. Очки фокуса задаются отдельно от числа известных фокальных заклинаний.</div>
         <div class="field"><label class="field-label">Максимум очков фокуса</label><input type="number" min="0" id="focusMaxInput" value="${focusMax}" style="max-width:120px;"></div>`}
         <div class="slot-row" style="margin-top:8px;">
           <div class="lbl">Очки фокуса</div>
@@ -2629,6 +2653,7 @@ function wireSpellsTab(){
       const [lvl, idx] = sel.dataset.prepSlot.split('|');
       sc.prepared[lvl][idx].spellId = sel.value || null;
       sc.prepared[lvl][idx].expended = false;
+      sanitizeSpellAssignments(CH);
       save(); renderApp();
     });
   });
@@ -2655,6 +2680,7 @@ function wireSpellsTab(){
     const sel = byId('focusAddSelect');
     if(sel && sel.value){
       sc.focus.spellIds.push(sel.value);
+      sanitizeSpellAssignments(CH);
       save(); renderApp();
     }
   });
@@ -2672,7 +2698,7 @@ function renderBooksTab(){
   const spellItems = spells.map(sp=>`
     <div class="list-item">
       <div class="list-item-head" data-item-toggle>
-        <div><div class="name">${escapeHtml(sp.name)}</div><div class="tag">Уровень ${sp.level}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
+        <div><div class="name">${escapeHtml(sp.name)}</div><div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
       </div>
       <div class="list-item-body">
         <div>${escapeHtml(sp.desc)||'Без описания'}</div>
@@ -2716,16 +2742,39 @@ function renderBooksTab(){
 }
 
 function spellFormHtml(sp){
-  sp = sp || {name:'', level:1, tradition:'', desc:''};
+  sp = sp || {name:'', level:1, tradition:'', desc:'', traits:[]};
+  const auto = isAutoHeightenSpell(sp);
+  const autoRank = autoHeightenRank(CH.level);
   return `
     <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" value="${escapeAttr(sp.name)}"></div>
     <div class="row2">
-      <div class="field"><label class="field-label">Уровень</label><input type="number" min="0" max="10" id="mfLevel" value="${sp.level}"></div>
+      <div class="field" id="mfLevelField" style="${auto?'display:none':''}"><label class="field-label">Уровень</label><input type="number" min="0" max="10" id="mfLevel" value="${sp.level}"></div>
+      <div class="field" id="mfLevelAutoField" style="${auto?'':'display:none'}"><label class="field-label">Круг</label><div class="play-text" id="mfLevelAutoText">${autoRank} круг · от уровня персонажа</div></div>
       <div class="field"><label class="field-label">Традиция/школа</label><input type="text" id="mfTradition" value="${escapeAttr(sp.tradition)}"></div>
     </div>
     <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(sp.desc)}</textarea></div>
     <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
   `;
+}
+function syncSpellLevelField(tags){
+  const auto = isAutoHeightenSpell({traits: tags || []});
+  const levelField = byId('mfLevelField');
+  const autoField = byId('mfLevelAutoField');
+  const autoText = byId('mfLevelAutoText');
+  if(levelField) levelField.style.display = auto ? 'none' : '';
+  if(autoField) autoField.style.display = auto ? '' : 'none';
+  if(autoText) autoText.textContent = autoHeightenRank(CH.level) + ' круг · от уровня персонажа';
+}
+function wireSpellForm(sp, onSave){
+  const tagEditor = createTagEditor(sp && sp.traits || [], {onChange: syncSpellLevelField});
+  byId('mfTagsContainer').appendChild(tagEditor.el);
+  syncSpellLevelField(tagEditor.getTags());
+  byId('mfCancel').addEventListener('click', closeModal);
+  byId('mfSave').addEventListener('click', ()=>{
+    onSave(tagEditor.getTags());
+    sanitizeSpellAssignments(CH);
+    save(); closeModal(); renderApp();
+  });
 }
 function formulaFormHtml(f){
   f = f || {name:'', level:1, note:''};
@@ -2749,12 +2798,8 @@ function wireBooksTab(){
     openModal('Новое заклинание', spellFormHtml() + `
       <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Добавить</button></div>
     `, ()=>{
-      const tagEditor = createTagEditor([]);
-      byId('mfTagsContainer').appendChild(tagEditor.el);
-      byId('mfCancel').addEventListener('click', closeModal);
-      byId('mfSave').addEventListener('click', ()=>{
-        CH.books.spellbook.push({id:uid(), name:byId('mfName').value||'Без названия', level:Number(byId('mfLevel').value)||0, tradition:byId('mfTradition').value, desc:byId('mfDesc').value, traits: tagEditor.getTags()});
-        save(); closeModal(); renderApp();
+      wireSpellForm(null, (traits)=>{
+        CH.books.spellbook.push({id:uid(), name:byId('mfName').value||'Без названия', level:Number(byId('mfLevel').value)||0, tradition:byId('mfTradition').value, desc:byId('mfDesc').value, traits});
       });
     });
   });
@@ -2765,14 +2810,10 @@ function wireBooksTab(){
       openModal('Изменить заклинание', spellFormHtml(sp) + `
         <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Сохранить</button></div>
       `, ()=>{
-        const tagEditor = createTagEditor(sp.traits||[]);
-        byId('mfTagsContainer').appendChild(tagEditor.el);
-        byId('mfCancel').addEventListener('click', closeModal);
-        byId('mfSave').addEventListener('click', ()=>{
+        wireSpellForm(sp, (traits)=>{
           sp.name=byId('mfName').value||sp.name; sp.level=Number(byId('mfLevel').value)||0;
           sp.tradition=byId('mfTradition').value; sp.desc=byId('mfDesc').value;
-          sp.traits = tagEditor.getTags();
-          save(); closeModal(); renderApp();
+          sp.traits = traits;
         });
       });
     });
@@ -2782,8 +2823,9 @@ function wireBooksTab(){
       e.stopPropagation();
       const id = btn.dataset.delSpell;
       CH.books.spellbook = CH.books.spellbook.filter(x=>x.id!==id);
-      // remove from prepared slots referencing this spell
       Object.values(CH.spellcasting.prepared).forEach(arr=>arr.forEach(s=>{ if(s.spellId===id){ s.spellId=null; s.expended=false; } }));
+      CH.spellcasting.focus.spellIds = (CH.spellcasting.focus.spellIds || []).filter(x=>x!==id);
+      sanitizeSpellAssignments(CH);
       save(); renderApp();
     });
   });
@@ -3577,7 +3619,7 @@ function renderSettingsTab(){
         <div class="more-item" style="border:none;padding-top:0;">
           <div><div class="t">Автосохранение</div><div class="d">Данные хранятся локально в кэше браузера. Последнее сохранение: ${savedDate}</div></div>
         </div>
-        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.3</div>
+        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.4</div>
       </div>
     </div>
   `;

@@ -1,6 +1,6 @@
 // Состояние персонажа, миграции и локальное хранилище.
 import { bagCompartmentLocation, getLibraryItem, instantiateLibraryItem, isBagItem, normalizeArmorData, normalizeBagData, normalizeCategory, normalizeShieldData, normalizeWeaponData } from './libraries/items.js';
-import { matchLibraryTrait } from './libraries/traits.js';
+import { matchLibraryTrait, spellFitsFocusList, spellFitsPreparedSlot } from './libraries/traits.js';
 
 const STORAGE_KEY = 'pf2_character_v1'; // прежний ключ: используется только для миграции
 const PROFILES_STORAGE_KEY = 'pf2_character_profiles_v1';
@@ -424,6 +424,30 @@ function migrateSpellcasting(raw){
   });
 }
 
+function sanitizeSpellAssignments(character){
+  if(!character) return character;
+  const book = (character.books && character.books.spellbook) || [];
+  const byId = new Map(book.map(spell => [spell.id, spell]));
+  const sc = character.spellcasting;
+  if(!sc) return character;
+  const prepared = sc.prepared && typeof sc.prepared === 'object' ? sc.prepared : {};
+  Object.keys(prepared).forEach(lvl => {
+    const slots = prepared[lvl];
+    if(!Array.isArray(slots)) return;
+    slots.forEach(slot => {
+      if(!slot || !slot.spellId) return;
+      if(!spellFitsPreparedSlot(byId.get(slot.spellId), Number(lvl))){
+        slot.spellId = null;
+        slot.expended = false;
+      }
+    });
+  });
+  if(sc.focus && Array.isArray(sc.focus.spellIds)){
+    sc.focus.spellIds = sc.focus.spellIds.filter(id => spellFitsFocusList(byId.get(id)));
+  }
+  return character;
+}
+
 function migrateDefenses(raw){
   const base = defaultCharacter().defenses;
   raw = raw && typeof raw === 'object' ? raw : {};
@@ -467,7 +491,7 @@ function migrateFeats(feats){
 
 function normalizeCharacter(parsed){
   parsed = parsed || {};
-  return Object.assign(defaultCharacter(), parsed, {
+  const character = Object.assign(defaultCharacter(), parsed, {
     abilities: migrateAbilities(parsed.abilities),
     descriptors: Object.assign(defaultCharacter().descriptors, parsed.descriptors||{}),
     hp: Object.assign(defaultCharacter().hp, parsed.hp||{}),
@@ -493,6 +517,7 @@ function normalizeCharacter(parsed){
     familiarEnabled: !!parsed.familiarEnabled,
     familiar: migrateFamiliar(parsed.familiar),
   });
+  return sanitizeSpellAssignments(character);
 }
 
 function loadProfilesState(){
@@ -565,4 +590,4 @@ export function createCharacterProfile(name=''){
 }
 
 
-export { ABILITY_DEFS, defaultCharacter, normalizeCharacter, loadCharacter };
+export { ABILITY_DEFS, defaultCharacter, normalizeCharacter, loadCharacter, sanitizeSpellAssignments };
