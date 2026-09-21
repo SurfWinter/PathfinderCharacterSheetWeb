@@ -146,7 +146,7 @@ function defaultCharacter(){
     },
     books:{
       formulas: [], // {id,name,level,note}
-      spellbook: [], // {id,name,level,tradition,desc,traits}
+      spellbook: [], // {id,name,level,tradition,desc,traits,cast}
     },
     feats: [], // {id,name,level,category,desc,traits}
     familiarEnabled: false,
@@ -386,11 +386,20 @@ function migrateEquipment(equipment){
 
   return {items: merged, storages};
 }
+export function normalizeCastCost(value){
+  const v = value == null ? '' : String(value);
+  if(v === '1' || v === '2' || v === '3' || v === 'reaction') return v;
+  if(v === '1-3' || v === '1–3') return '1-3';
+  return '2';
+}
 function migrateBooks(books){
   const defaults = defaultCharacter().books;
   return Object.assign(defaults, books||{}, {
     formulas: Array.isArray(books && books.formulas) ? books.formulas : [],
-    spellbook: Array.isArray(books && books.spellbook) ? books.spellbook.map(spell=>Object.assign({}, spell, {traits:normalizeTraits(spell.traits)})) : [],
+    spellbook: Array.isArray(books && books.spellbook) ? books.spellbook.map(spell=>Object.assign({}, spell, {
+      traits: normalizeTraits(spell.traits),
+      cast: normalizeCastCost(spell.cast),
+    })) : [],
   });
 }
 function migrateSpellcasting(raw){

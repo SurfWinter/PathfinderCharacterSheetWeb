@@ -1,4 +1,4 @@
-import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterProfiles, loadCharacter, normalizeCharacter, sanitizeSpellAssignments, saveCharacter, switchCharacterProfile, uid } from './character-state.js';
+import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterProfiles, loadCharacter, normalizeCastCost, normalizeCharacter, sanitizeSpellAssignments, saveCharacter, switchCharacterProfile, uid } from './character-state.js';
 import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
@@ -2396,6 +2396,63 @@ function togglePreparedSlot(lvl, idx){
   return slot.expended;
 }
 
+const CAST_COSTS = ['1','2','3','1-3','reaction'];
+const CAST_COST_LABEL = {
+  '1':'Одно действие',
+  '2':'Два действия',
+  '3':'Три действия',
+  '1-3':'От одного до трёх действий',
+  'reaction':'Реакция',
+};
+function diamondSvg(filled){
+  if(filled){
+    return `<svg class="cast-dia" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.15 10.85 6 6 10.85 1.15 6Z" fill="currentColor"/></svg>`;
+  }
+  return `<svg class="cast-dia outline" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1.15 10.85 6 6 10.85 1.15 6Z" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>`;
+}
+function reactionSvg(){
+  return `<svg class="cast-react" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3.1 6.15 1.25 4.2 3.45 2.25" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M1.7 4.2h6.15A5.2 5.2 0 1 1 4.7 13.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`;
+}
+function castCostInner(cast){
+  cast = normalizeCastCost(cast);
+  if(cast === 'reaction') return reactionSvg();
+  if(cast === '1-3') return diamondSvg(true) + `<span class="cast-dash">–</span>` + diamondSvg(false) + diamondSvg(false);
+  const n = Number(cast);
+  let html = '';
+  for(let i=0;i<n;i++) html += diamondSvg(true);
+  return html;
+}
+function castCostHtml(cast){
+  cast = normalizeCastCost(cast);
+  const label = CAST_COST_LABEL[cast];
+  return `<span class="cast-cost" data-cast="${cast}" title="${label}" aria-label="${label}">${castCostInner(cast)}</span>`;
+}
+function spellNameRowHtml(sp){
+  return `<div class="name-row"><span class="name">${escapeHtml(sp.name)}</span>${castCostHtml(sp.cast)}</div>`;
+}
+function castPickerHtml(cast){
+  cast = normalizeCastCost(cast);
+  const opts = CAST_COSTS.map(v=>{
+    const on = v === cast;
+    return `<button type="button" class="cast-opt${on?' active':''}" data-cast-opt="${v}" title="${CAST_COST_LABEL[v]}" aria-label="${CAST_COST_LABEL[v]}" aria-pressed="${on?'true':'false'}">${castCostInner(v)}</button>`;
+  }).join('');
+  return `<div class="field"><label class="field-label">Стоимость сотворения</label><div class="cast-picker">${opts}</div><input type="hidden" id="mfCast" value="${escapeAttr(cast)}"></div>`;
+}
+function wireCastPicker(){
+  const hidden = byId('mfCast');
+  document.querySelectorAll('[data-cast-opt]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const v = normalizeCastCost(btn.dataset.castOpt);
+      if(hidden) hidden.value = v;
+      document.querySelectorAll('[data-cast-opt]').forEach(b=>{
+        const on = b.dataset.castOpt === v;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    });
+  });
+}
+
 function preparedCardHtml(lvl, idx, slot){
   if(!slot || !slot.spellId) return '';
   const sp = CH.books.spellbook.find(s=>s.id===slot.spellId);
@@ -2410,7 +2467,7 @@ function preparedCardHtml(lvl, idx, slot){
     <div class="list-item ${spent ? 'spent' : ''}">
       <div class="list-item-head">
         <div ${canSpend ? `data-prep-cast="${lvl}|${idx}" style="flex:1;min-width:0;cursor:pointer;"` : 'style="flex:1;min-width:0;"'}>
-          <div class="name">${escapeHtml(sp.name)}</div>
+          ${spellNameRowHtml(sp)}
           <div class="tag">${escapeHtml(extra)}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>
           ${tagsMetaHtml(sp.traits)}
         </div>
@@ -2491,7 +2548,7 @@ function renderSpellsTab(){
     return `
     <div class="list-item">
       <div class="list-item-head">
-        <div style="flex:1;min-width:0;"><div class="name">${escapeHtml(sp.name)}</div><div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
+        <div style="flex:1;min-width:0;">${spellNameRowHtml(sp)}<div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
         <button type="button" class="chev-btn" data-item-toggle aria-label="Описание">
           <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
         </button>
@@ -2698,7 +2755,7 @@ function renderBooksTab(){
   const spellItems = spells.map(sp=>`
     <div class="list-item">
       <div class="list-item-head" data-item-toggle>
-        <div><div class="name">${escapeHtml(sp.name)}</div><div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
+        <div>${spellNameRowHtml(sp)}<div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
       </div>
       <div class="list-item-body">
         <div>${escapeHtml(sp.desc)||'Без описания'}</div>
@@ -2742,11 +2799,12 @@ function renderBooksTab(){
 }
 
 function spellFormHtml(sp){
-  sp = sp || {name:'', level:1, tradition:'', desc:'', traits:[]};
+  sp = sp || {name:'', level:1, tradition:'', desc:'', traits:[], cast:'2'};
   const auto = isAutoHeightenSpell(sp);
   const autoRank = autoHeightenRank(CH.level);
   return `
     <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" value="${escapeAttr(sp.name)}"></div>
+    ${castPickerHtml(sp.cast)}
     <div class="row2">
       <div class="field" id="mfLevelField" style="${auto?'display:none':''}"><label class="field-label">Уровень</label><input type="number" min="0" max="10" id="mfLevel" value="${sp.level}"></div>
       <div class="field" id="mfLevelAutoField" style="${auto?'':'display:none'}"><label class="field-label">Круг</label><div class="play-text" id="mfLevelAutoText">${autoRank} круг · от уровня персонажа</div></div>
@@ -2769,9 +2827,10 @@ function wireSpellForm(sp, onSave){
   const tagEditor = createTagEditor(sp && sp.traits || [], {onChange: syncSpellLevelField});
   byId('mfTagsContainer').appendChild(tagEditor.el);
   syncSpellLevelField(tagEditor.getTags());
+  wireCastPicker();
   byId('mfCancel').addEventListener('click', closeModal);
   byId('mfSave').addEventListener('click', ()=>{
-    onSave(tagEditor.getTags());
+    onSave(tagEditor.getTags(), normalizeCastCost(byId('mfCast') && byId('mfCast').value));
     sanitizeSpellAssignments(CH);
     save(); closeModal(); renderApp();
   });
@@ -2798,8 +2857,8 @@ function wireBooksTab(){
     openModal('Новое заклинание', spellFormHtml() + `
       <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Добавить</button></div>
     `, ()=>{
-      wireSpellForm(null, (traits)=>{
-        CH.books.spellbook.push({id:uid(), name:byId('mfName').value||'Без названия', level:Number(byId('mfLevel').value)||0, tradition:byId('mfTradition').value, desc:byId('mfDesc').value, traits});
+      wireSpellForm(null, (traits, cast)=>{
+        CH.books.spellbook.push({id:uid(), name:byId('mfName').value||'Без названия', level:Number(byId('mfLevel').value)||0, tradition:byId('mfTradition').value, desc:byId('mfDesc').value, traits, cast});
       });
     });
   });
@@ -2810,10 +2869,11 @@ function wireBooksTab(){
       openModal('Изменить заклинание', spellFormHtml(sp) + `
         <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Сохранить</button></div>
       `, ()=>{
-        wireSpellForm(sp, (traits)=>{
+        wireSpellForm(sp, (traits, cast)=>{
           sp.name=byId('mfName').value||sp.name; sp.level=Number(byId('mfLevel').value)||0;
           sp.tradition=byId('mfTradition').value; sp.desc=byId('mfDesc').value;
           sp.traits = traits;
+          sp.cast = cast;
         });
       });
     });
@@ -3619,7 +3679,7 @@ function renderSettingsTab(){
         <div class="more-item" style="border:none;padding-top:0;">
           <div><div class="t">Автосохранение</div><div class="d">Данные хранятся локально в кэше браузера. Последнее сохранение: ${savedDate}</div></div>
         </div>
-        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.4</div>
+        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.5</div>
       </div>
     </div>
   `;
