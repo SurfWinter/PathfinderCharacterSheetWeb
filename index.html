@@ -3,13 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#14161b">
 <title>Лист персонажа — Pathfinder 2e</title>
-<link rel="icon" href="./favicon.svg" type="image/svg+xml">
-<script type="module" crossorigin src="./assets/index-ux141.js"></script>
-<link rel="stylesheet" crossorigin href="./assets/index-ux141.css">
+  <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
-<div id="root"></div>
+
+<div id="app"></div>
+
+<div class="navbar" id="navbar"></div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<input type="file" id="importFileInput" accept=".xml" style="display:none">
+
+  <script src="assets/app.bundle.js" defer></script>
 </body>
 </html>
