@@ -1,15 +1,16 @@
-import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, listCharacterProfiles, loadCharacter, normalizeCastCost, normalizeCharacter, sanitizeSpellAssignments, saveCharacter, switchCharacterProfile, uid } from './character-state.js';
+import { ABILITY_DEFS, createCharacterProfile, defaultCharacter, deleteCharacterProfile, emptyCurriculumPrepared, listCharacterProfiles, loadCharacter, normalizeCastCost, normalizeCharacter, sanitizeSpellAssignments, saveCharacter, switchCharacterProfile, uid } from './character-state.js';
 import { characterToXml, parseCharacterXml } from './character-xml.js';
 import { byId, showToast } from './dom.js';
 import { enableTouchReorder } from './drag-reorder.js';
 import { instantiateLibraryFamiliarAbility, getLibraryFamiliarAbility, matchLibraryFamiliarAbility, searchLibraryFamiliarAbilities, DAMAGE_TYPES_RESISTANCE, SKILLED_EXCLUDED, hasFamiliarEffect, familiarAbilityEffect, skilledSkillsFromAbilities, resistanceFromAbilities } from './libraries/familiar-abilities.js';
 import { TRAIT_LIBRARY, autoHeightenRank, getLibraryTrait, isAutoHeightenSpell, matchLibraryTrait, spellDisplayRank, spellFitsFocusList, spellFitsPreparedSlot, spellHasCantripTrait, spellHasFocusTrait } from './libraries/traits.js';
-import { instantiateLibraryRune, searchLibraryRunes } from './libraries/runes.js';
+import { instantiateLibraryRune, searchLibraryRunes, RUNE_SLOT_LABELS } from './libraries/runes.js';
 import {
   ITEM_CATEGORY_LABELS,
+  FORMULA_CATEGORY_LABELS,
   bagCompartmentLocation, bagEffectiveBulk, canHoldRunes, compartmentContentsBulk,
-  emptyCustomItem, getLibraryItem, instantiateLibraryItem, isBagItem, itemBulkValue,
-  normalizeArmorData, normalizeBagData, normalizeCategory, normalizeShieldData, normalizeWeaponData,
+  emptyCustomItem, getLibraryItem, instantiateLibraryItem, isBagItem, isFormulaRune, itemBulkValue,
+  normalizeArmorData, normalizeBagData, normalizeCategory, normalizeFormulaCategory, normalizeShieldData, normalizeWeaponData,
   parseItemLocation, parseStatNumber, searchLibraryItems, wornCarriedBulk,
 } from './libraries/items.js';
 
@@ -39,6 +40,18 @@ function equippedItem(slot){
 }
 function itemHasLibraryTrait(item, id){
   return !!(item && (item.traits || []).some(trait => trait && trait.type === 'library' && trait.id === id));
+}
+function characterHasTrait(id){
+  const lib = getLibraryTrait(id);
+  return (CH.traits || []).some(trait => {
+    if(!trait) return false;
+    if(trait.type === 'library' && trait.id === id) return true;
+    const name = trait.type === 'custom' ? trait.name : trait.name;
+    if(!name) return false;
+    const matched = matchLibraryTrait(name);
+    if(matched && matched.id === id) return true;
+    return !!(lib && String(name).trim().toLocaleLowerCase('ru') === lib.name.toLocaleLowerCase('ru'));
+  });
 }
 function weaponAbilityId(item){
   const type = item && item.weapon && item.weapon.type === 'ranged' ? 'ranged' : 'melee';
@@ -160,32 +173,38 @@ function onEl(el, ev, fn){
   if(el) el.addEventListener(ev, fn);
   return el;
 }
+function scheduleRenderOnBlur(){
+  setTimeout(()=>{
+    const a = document.activeElement;
+    if(a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')) return;
+    renderApp();
+  }, 0);
+}
 function rankLabel(lvl){
   lvl = Number(lvl);
-  return lvl === 0 ? 'Заговоры' : (lvl + ' круг');
+  return lvl === 0 ? 'Фокусы' : (lvl + ' круг');
 }
 function preparedGroupLabel(lvl){
   lvl = Number(lvl);
-  if(lvl === 0) return 'Заговоры · ' + autoHeightenRank(CH.level) + ' круг';
+  if(lvl === 0) return 'Фокусы · ' + autoHeightenRank(CH.level) + ' круг';
   return rankLabel(lvl);
 }
 function spellOptionLabel(spell){
   const rank = spellDisplayRank(spell, CH.level);
   if(spellHasCantripTrait(spell) && !spellHasFocusTrait(spell)) return `${spell.name} (фокус · ${rank} круг)`;
   if(spellHasFocusTrait(spell) && !spellHasCantripTrait(spell)) return `${spell.name} (фокальное · ${rank} круг)`;
-  return `${spell.name} (${rank === 0 ? '0 круг' : rank + ' круг'})`;
+  return `${spell.name} (${rank} круг)`;
 }
 function spellRankText(spell){
   const rank = spellDisplayRank(spell, CH.level);
-  if(isAutoHeightenSpell(spell)) return rank + ' круг';
-  return rank === 0 ? '0 круг' : rank + ' круг';
+  return rank + ' круг';
 }
 function rankToast(lvl){
   lvl = Number(lvl);
-  if(lvl === 0) return 'заговоров';
+  if(lvl === 0) return 'фокусов';
   return lvl + ' круга';
 }
-function slotDotsHtml(kind, key, max, used, variant){
+function slotDotsHtml(kind, key, max, used, variant, extraHtml){
   max = Math.max(0, Number(max) || 0);
   used = clamp(Number(used) || 0, 0, max);
   const remaining = max - used;
@@ -195,8 +214,15 @@ function slotDotsHtml(kind, key, max, used, variant){
     const action = filled ? 'spend' : 'restore';
     dots += `<button type="button" class="slot-dot ${filled ? 'filled' : ''} ${variant === 'focus' ? 'focus-dot' : ''}" data-slot-dot="${kind}|${key}|${action}|${i}" aria-label="${filled ? 'Потратить' : 'Вернуть'}"></button>`;
   }
-  if(!max) return '<span class="empty-hint" style="padding:0;">Нет</span>';
+  if(extraHtml) dots += extraHtml;
+  if(!max && !extraHtml) return '<span class="empty-hint" style="padding:0;">Нет</span>';
   return `<div class="slot-dots">${dots}</div>`;
+}
+function curriculumDotHtml(lvl){
+  const slot = CH.spellcasting.curriculumPrepared && CH.spellcasting.curriculumPrepared[lvl];
+  const available = !!(slot && slot.spellId && !slot.expended);
+  const action = available ? 'spend' : 'restore';
+  return `<button type="button" class="slot-dot curr-dot ${available ? 'filled' : ''}" data-slot-dot="curr|${lvl}|${action}|0" title="Учебный план" aria-label="${available ? 'Потратить учебный план' : 'Вернуть учебный план'}"></button>`;
 }
 
 function renderTopbar(title, subtitle, opts){
@@ -308,6 +334,7 @@ function renderApp(){
 
   renderNav();
   if(activeTab === 'familiar' && !CH.familiarEnabled) activeTab = 'character';
+  if(booksSection === 'curriculum' && !CH.curriculumEnabled) booksSection = 'spellbook';
   if(activeTab === 'more') activeTab = 'settings';
   const app = document.getElementById('app');
   let html = '';
@@ -482,12 +509,13 @@ function renderCharacterTab(){
           <div class="field"><label class="field-label">Класс</label><input type="text" id="charClass" value="${escapeAttr(CH.className)}"></div>
           <div class="field"><label class="field-label">Уровень</label><input type="number" id="charLevel" min="1" max="20" value="${CH.level}"></div>
         </div>`}
+        ${characterHasTrait('mythic') ? `
         <div class="mythic-row">
           <span class="field-label" style="margin:0;">Мифические очки</span>
           <div class="mythic-dots">
             ${[0,1,2].map(i=>`<div class="dot ${i < CH.mythicPoints ? 'filled':''}" data-mythic="${i+1}"></div>`).join('')}
           </div>
-        </div>
+        </div>` : ''}
       </div>
 
       <div class="card">
@@ -729,7 +757,8 @@ function wireCharacterTab(){
   const root = document.querySelector('.page.active');
   wireCollapsibles(root);
 
-  onEl(byId('charName'), 'input', e=>{ CH.name=e.target.value; save(); refreshTopbarOnly(); });
+  onEl(byId('charName'), 'input', e=>{ CH.name=e.target.value; save(); });
+  onEl(byId('charName'), 'blur', scheduleRenderOnBlur);
   onEl(byId('descAncestry'), 'input', e=>{ CH.descriptors.ancestry=e.target.value; save(); });
   onEl(byId('descHeritage'), 'input', e=>{ CH.descriptors.heritage=e.target.value; save(); });
   onEl(byId('descBackground'), 'input', e=>{ CH.descriptors.background=e.target.value; save(); });
@@ -746,7 +775,8 @@ function wireCharacterTab(){
     bindAutosize(notesEl);
     notesEl.addEventListener('input', e=>{ CH.notes=e.target.value; save(); });
   }
-  onEl(byId('charClass'), 'input', e=>{ CH.className=e.target.value; save(); renderApp(); });
+  onEl(byId('charClass'), 'input', e=>{ CH.className=e.target.value; save(); });
+  onEl(byId('charClass'), 'blur', scheduleRenderOnBlur);
   onEl(byId('charLevel'), 'input', e=>{ CH.level=Number(e.target.value)||1; save(); renderApp(); });
 
   root.querySelectorAll('[data-mythic]').forEach(dot=>{
@@ -848,12 +878,15 @@ function wireCharacterTab(){
       applyHpDelta(Number(btn.dataset.delta));
     });
   });
-  onEl(byId('hpCurrentInput'), 'input', e=>{ CH.hp.current = clamp(Number(e.target.value)||0, -9999, CH.hp.max); save(); renderApp(); });
-  onEl(byId('hpMaxInput'), 'input', e=>{ CH.hp.max = Math.max(0,Number(e.target.value)||0); save(); renderApp(); });
+  onEl(byId('hpCurrentInput'), 'input', e=>{ CH.hp.current = clamp(Number(e.target.value)||0, -9999, CH.hp.max); save(); });
+  onEl(byId('hpCurrentInput'), 'blur', scheduleRenderOnBlur);
+  onEl(byId('hpMaxInput'), 'input', e=>{ CH.hp.max = Math.max(0,Number(e.target.value)||0); save(); });
+  onEl(byId('hpMaxInput'), 'blur', scheduleRenderOnBlur);
   onEl(byId('hpTempInput'), 'input', e=>{
     CH.hp.temp = Math.max(0,Number(e.target.value)||0);
-    save(); renderApp();
+    save();
   });
+  onEl(byId('hpTempInput'), 'blur', scheduleRenderOnBlur);
 
   root.querySelectorAll('[data-resist-del]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -978,7 +1011,7 @@ function wireCharacterTab(){
   root.querySelectorAll('[data-skill-bonus]').forEach(inp=>{
     inp.addEventListener('input', ()=>{
       const s = CH.skills.find(x=>x.id===inp.dataset.skillBonus);
-      s.otherBonus = Number(inp.value)||0; save(); renderApp();
+      s.otherBonus = Number(inp.value)||0; save();
     });
   });
   root.querySelectorAll('[data-skill-name]').forEach(inp=>{
@@ -1064,10 +1097,6 @@ function applyHpFill(){
   save(); renderApp();
 }
 function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
-function refreshTopbarOnly(){
-  const t = document.querySelector('.topbar .title');
-  if(t) t.textContent = 'Персонаж';
-}
 
 /* =========================================================================
    MODAL HELPER
@@ -1186,7 +1215,7 @@ function tagsMetaHtml(tags){
 function wireListItemToggles(root){
   root.querySelectorAll('[data-item-toggle]').forEach(el=>{
     el.addEventListener('click', (e)=>{
-      if(e.target.closest('input, select, textarea, .spent-badge, [data-prep-cast]')) return;
+      if(e.target.closest('input, select, textarea, .spent-badge, [data-prep-cast], [data-copy-to-formula], [data-copy-to-eq], .formula-copy-btn')) return;
       e.stopPropagation();
       const item = el.closest('.list-item');
       if(!item) return;
@@ -1426,10 +1455,13 @@ function fillBarHtml(used, cap){
     <div class="weight-bar"><div class="weight-bar-fill ${over ? 'over' : ''}" style="width:${pct}%"></div></div>
   `;
 }
-function itemStatsHtml(item){
+function itemStatsHtml(item, opts){
+  opts = opts || {};
   if(item.weapon){
     const w = item.weapon;
-    const combat = `${fmtMod(weaponAttackMod(item))} · ${weaponDamageLabel(item)}`;
+    const combat = opts.formula
+      ? [w.damage, w.damageType].filter(Boolean).join(' ')
+      : `${fmtMod(weaponAttackMod(item))} · ${weaponDamageLabel(item)}`;
     const parts = [
       w.type === 'ranged' ? 'дальнобойное' : 'ближний бой',
       w.group, w.hands ? `${w.hands} рук.` : '',
@@ -1437,7 +1469,8 @@ function itemStatsHtml(item){
       w.type === 'ranged' && w.reload !== '' && w.reload != null ? `перезарядка ${w.reload}` : '',
       w.type === 'ranged' ? w.ammo : '',
     ].filter(part=>part);
-    return `<div class="weapon-combat"><span class="atk">${escapeHtml(combat)}</span></div>${parts.length ? `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>` : ''}`;
+    const combatHtml = combat ? `<div class="weapon-combat"><span class="atk">${escapeHtml(combat)}</span></div>` : '';
+    return `${combatHtml}${parts.length ? `<div class="item-stat-line">${escapeHtml(parts.join(' · '))}</div>` : ''}`;
   }
   if(item.armor){
     const a = item.armor;
@@ -1480,6 +1513,64 @@ function itemDescriptionHtml(item){
   });
   return blocks.length ? blocks.join('') : 'Нет описания';
 }
+function cloneItemRecord(item){
+  const copy = Object.assign({}, item, {
+    id: uid(),
+    traits: Array.isArray(item.traits) ? item.traits.map(t => Object.assign({}, t)) : [],
+    runes: [],
+    weapon: item.weapon ? Object.assign({}, item.weapon) : null,
+    armor: item.armor ? Object.assign({}, item.armor) : null,
+    shield: item.shield ? Object.assign({}, item.shield) : null,
+    consumable: item.consumable ? Object.assign({}, item.consumable) : null,
+    bag: null,
+  });
+  if(item.bag){
+    copy.bag = {
+      weightMode: item.bag.weightMode,
+      ignoreBulk: item.bag.ignoreBulk,
+      compartments: (item.bag.compartments || []).map(c => ({
+        id: uid(),
+        name: c.name || '',
+        capacity: Number(c.capacity) || 0,
+      })),
+    };
+  }
+  delete copy.shieldHpCurrent;
+  return copy;
+}
+function cloneEquipmentToFormula(item){
+  const copy = cloneItemRecord(item);
+  copy.qty = 1;
+  copy.location = 'formula';
+  copy.runes = [];
+  delete copy.runeSlot;
+  return copy;
+}
+function cloneFormulaToEquipment(item){
+  if(!item || isFormulaRune(item)) return null;
+  const copy = cloneItemRecord(item);
+  copy.qty = 1;
+  copy.location = 'worn';
+  copy.runes = [];
+  delete copy.runeSlot;
+  return copy;
+}
+function formulaCopyBtnHtml(itemId){
+  if(isPlay()) return '';
+  return `<button type="button" class="icon-btn formula-copy-btn" data-copy-to-formula="${itemId}" title="В формулы" aria-label="Добавить в формулы">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS.book}</svg>
+  </button>`;
+}
+function addFormulaFromEquipment(id){
+  const item = CH.equipment.items.find(entry=>entry.id===id);
+  if(!item || item.isCurrency) return;
+  if(!Array.isArray(CH.books.formulas)) CH.books.formulas = [];
+  const copy = cloneEquipmentToFormula(item);
+  CH.books.formulas.push(copy);
+  openBookGroup('fm:' + normalizeFormulaCategory(copy.category));
+  save();
+  showToast('Добавлено в формулы');
+}
 function regularItemsAt(location){
   return CH.equipment.items.filter(item=>!item.isCurrency && !isBagItem(item) && item.location === location);
 }
@@ -1504,7 +1595,7 @@ function itemRowHtml(item){
           ${tagsMetaHtml(item.traits)}
           ${runesHtml(item)}
         </div>
-        ${play ? `<div class="play-qty"><input type="number" min="0" data-qty="${item.id}" value="${item.qty}"></div>` : ''}
+        ${play ? `<div class="play-qty"><input type="number" min="0" data-qty="${item.id}" value="${item.qty}"></div>` : formulaCopyBtnHtml(item.id)}
       </div>
       ${play ? '' : `
       <div class="eq-item-controls">
@@ -1553,6 +1644,7 @@ function bagCardHtml(bag){
         </div>
         ${play ? '' : `
         <div class="bag-card-actions">
+          ${formulaCopyBtnHtml(bag.id)}
           <select class="locsel" data-loc="${bag.id}">${locationOptions(bag.location, {forBag:true})}</select>
           <button class="skill-del" data-item-edit="${bag.id}" title="Изменить">✎</button>
           <button class="skill-del" data-item-del="${bag.id}" title="Удалить">✕</button>
@@ -1619,6 +1711,7 @@ function equipSlotHtml(kind){
       ${tagsMetaHtml(item.traits)}
       ${isPlay() ? '' : `
       <div class="equip-slot-actions">
+        ${formulaCopyBtnHtml(item.id)}
         <button class="btn btn-sm" data-unequip="${item.id}">Снять</button>
         <button class="skill-del" data-item-edit="${item.id}" title="Изменить">✎</button>
       </div>`}
@@ -1819,27 +1912,34 @@ function bagFieldsHtml(bag){
 function itemFormHtml(item, opts={}){
   item = item || emptyCustomItem(opts.bagOnly ? 'bag' : 'other', uid);
   const cat = normalizeCategory(item.category);
+  const formula = !!opts.formula;
   const catOpts = Object.entries(ITEM_CATEGORY_LABELS).map(([id, label])=>
     `<option value="${id}" ${cat===id?'selected':''}>${label}</option>`
   ).join('');
+  const categoryField = `<div class="field"><label class="field-label">Категория</label>
+        <select id="mfCategory" ${opts.lockCategory ? 'disabled' : ''}>${catOpts}</select>
+      </div>`;
   return `
     <div class="field">
       <label class="field-label">Название</label>
       <input type="text" id="mfName" data-library-id="${escapeAttr(item.libraryId || '')}" value="${escapeAttr(item.name)}" autocomplete="off">
       ${opts.isNew ? '<div id="mfItemSuggestions" class="tag-suggestions"></div><div class="hint-line">Начните вводить название — появятся предметы из библиотеки</div>' : ''}
     </div>
+    ${formula ? `
+    <div class="row2">
+      ${categoryField}
+      <div class="field"><label class="field-label">Объём</label><input type="number" id="mfBulk" step="0.1" value="${item.bulk || 0}"></div>
+    </div>` : `
     <div class="row2">
       <div class="field"><label class="field-label">Количество</label><input type="number" id="mfQty" min="0" value="${item.qty == null ? 1 : item.qty}"></div>
       <div class="field"><label class="field-label">Объём за штуку</label><input type="number" id="mfBulk" step="0.1" value="${item.bulk || 0}"></div>
     </div>
     <div class="row2">
-      <div class="field"><label class="field-label">Категория</label>
-        <select id="mfCategory" ${opts.lockCategory ? 'disabled' : ''}>${catOpts}</select>
-      </div>
+      ${categoryField}
       <div class="field"><label class="field-label">Где находится</label>
         <select id="mfLoc">${locationOptions(item.location || (opts.lockCategory ? 'worn' : fallbackItemLocation()), {forBag: cat === 'bag' || opts.lockCategory, category: cat})}</select>
       </div>
-    </div>
+    </div>`}
     <div class="field"><label class="field-label">Заметка</label><input type="text" id="mfNote" value="${escapeAttr(item.note)}"></div>
     <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(item.desc)}</textarea></div>
     <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
@@ -1848,10 +1948,10 @@ function itemFormHtml(item, opts={}){
     ${shieldFieldsHtml(item.shield)}
     ${consumableFieldsHtml(item.consumable)}
     ${bagFieldsHtml(item.bag)}
-    <div class="form-section" data-cat-section="weapon,armor,shield">
+    ${formula ? '' : `<div class="form-section" data-cat-section="weapon,armor,shield">
       <h4>Руны</h4>
       <div id="mfRunesContainer"></div>
-    </div>
+    </div>`}
   `;
 }
 function syncCategorySections(){
@@ -2004,23 +2104,34 @@ function createRunesEditor(initialRunes, opts={}){
     },
   };
 }
-function applyItemForm(target){
+function applyItemForm(target, mode){
+  const formula = mode === 'formula';
   const category = normalizeCategory(byId('mfCategory').value);
   const wasBag = isBagItem(target);
-  const oldCompartments = wasBag ? target.bag.compartments.slice() : [];
   target.name = byId('mfName').value.trim() || 'Без названия';
   const picked = byId('mfName').dataset.libraryId;
   if(picked) target.libraryId = picked;
-  target.qty = Math.max(0, Number(byId('mfQty').value) || 0);
-  target.bulk = Number(byId('mfBulk').value) || 0;
   target.category = category;
-  let location = byId('mfLoc').value;
-  if(category === 'bag' && parseItemLocation(location).type === 'bag') location = 'worn';
-  setItemLocation(target, location);
   target.note = byId('mfNote').value;
   target.desc = byId('mfDesc').value;
   target.custom = true;
   target.isCurrency = false;
+  if(formula){
+    target.qty = 1;
+    target.bulk = Number(byId('mfBulk') && byId('mfBulk').value) || 0;
+    target.location = 'formula';
+    delete target.shieldHpCurrent;
+    delete target.runeSlot;
+  } else {
+    const qtyEl = byId('mfQty');
+    const bulkEl = byId('mfBulk');
+    const locEl = byId('mfLoc');
+    target.qty = Math.max(0, Number(qtyEl && qtyEl.value) || 0);
+    target.bulk = Number(bulkEl && bulkEl.value) || 0;
+    let location = locEl ? locEl.value : (target.location || 'worn');
+    if(category === 'bag' && parseItemLocation(location).type === 'bag') location = 'worn';
+    setItemLocation(target, location);
+  }
   if(category === 'weapon'){
     const prev = target.weapon || {};
     target.weapon = normalizeWeaponData({
@@ -2046,7 +2157,7 @@ function applyItemForm(target){
       hardness: Number(byId('mfSHard').value) || 0,
       hpMax: max,
     });
-    if(target.location === 'equipped-shield'){
+    if(!formula && target.location === 'equipped-shield'){
       target.shieldHpCurrent = Math.max(0, Math.min(max, target.shieldHpCurrent == null ? max : Number(target.shieldHpCurrent) || 0));
     } else {
       delete target.shieldHpCurrent;
@@ -2065,7 +2176,7 @@ function applyItemForm(target){
       ignoreBulk: byId('mfBagMode').value === 'fixed' ? 0 : (Number(byId('mfBagIgnore').value) || 0),
       compartments: compartments.length ? compartments : [{id: uid(), name: '', capacity: 4}],
     };
-    if(wasBag){
+    if(!formula && wasBag){
       const keep = new Set(target.bag.compartments.map(entry=>entry.id));
       const dest = bagCompartmentLocation(target.id, target.bag.compartments[0].id);
       CH.equipment.items.forEach(item=>{
@@ -2075,7 +2186,7 @@ function applyItemForm(target){
       });
     }
   } else {
-    if(wasBag){
+    if(!formula && wasBag){
       const dest = fallbackItemLocation(target.id);
       CH.equipment.items.forEach(item=>{
         if(String(item.location).startsWith(`bag:${target.id}:`)) item.location = dest;
@@ -2083,7 +2194,7 @@ function applyItemForm(target){
     }
     target.bag = null;
   }
-  if(!canHoldRunes(target)) target.runes = [];
+  if(formula || !canHoldRunes(target)) target.runes = [];
   return target;
 }
 function openItemEditor(opts){
@@ -2097,14 +2208,15 @@ function openItemEditor(opts){
   `, ()=>{
     const tagEditor = createTagEditor(item.traits || []);
     byId('mfTagsContainer').appendChild(tagEditor.el);
-    const runesEditor = createRunesEditor(item.runes || [], {
+    const runesWrap = byId('mfRunesContainer');
+    const runesEditor = runesWrap ? createRunesEditor(item.runes || [], {
       getSlot: () => normalizeCategory(byId('mfCategory').value),
-    });
-    byId('mfRunesContainer').appendChild(runesEditor.el);
+    }) : null;
+    if(runesEditor) runesWrap.appendChild(runesEditor.el);
     wireBagCompartmentEditor();
     byId('mfCategory').addEventListener('change', ()=>{
       syncCategorySections();
-      runesEditor.refresh();
+      if(runesEditor) runesEditor.refresh();
     });
     const wType = byId('mfWType');
     if(wType) wType.addEventListener('change', syncCategorySections);
@@ -2124,9 +2236,17 @@ function openItemEditor(opts){
           btn.addEventListener('click', ()=>{
             const next = instantiateLibraryItem(entry, uid);
             next.id = item.id;
-            next.qty = Math.max(1, Number(byId('mfQty').value) || 1);
-            next.location = byId('mfLoc').value || item.location;
-            if(next.category === 'bag' && parseItemLocation(next.location).type === 'bag') next.location = 'worn';
+            if(opts.formula){
+              next.qty = 1;
+              next.location = 'formula';
+              next.runes = [];
+              delete next.shieldHpCurrent;
+              delete next.runeSlot;
+            } else {
+              next.qty = Math.max(1, Number(byId('mfQty').value) || 1);
+              next.location = byId('mfLoc').value || item.location;
+              if(next.category === 'bag' && parseItemLocation(next.location).type === 'bag') next.location = 'worn';
+            }
             closeModal();
             openItemEditor(Object.assign({}, opts, {item: next}));
           });
@@ -2138,11 +2258,19 @@ function openItemEditor(opts){
     }
     byId('mfCancel').addEventListener('click', closeModal);
     byId('mfSave').addEventListener('click', ()=>{
-      applyItemForm(item);
+      applyItemForm(item, opts.formula ? 'formula' : 'equipment');
       item.traits = tagEditor.getTags();
-      item.runes = canHoldRunes(item) ? runesEditor.getRunes() : [];
-      if(isNew && !CH.equipment.items.some(entry=>entry.id === item.id)){
-        CH.equipment.items.push(item);
+      if(opts.formula){
+        item.runes = [];
+        if(isNew && !CH.books.formulas.some(entry=>entry.id === item.id)){
+          CH.books.formulas.push(item);
+        }
+        openBookGroup('fm:' + normalizeFormulaCategory(item.category));
+      } else {
+        item.runes = canHoldRunes(item) && runesEditor ? runesEditor.getRunes() : [];
+        if(isNew && !CH.equipment.items.some(entry=>entry.id === item.id)){
+          CH.equipment.items.push(item);
+        }
       }
       save();
       closeModal();
@@ -2176,6 +2304,12 @@ function wireEquipmentTab(){
       }
       const desc = card.querySelector('.bag-desc');
       if(desc) desc.classList.toggle('open');
+    });
+  });
+  root.querySelectorAll('[data-copy-to-formula]').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      addFormulaFromEquipment(btn.dataset.copyToFormula);
     });
   });
   root.querySelectorAll('[data-currency]').forEach(inp=>{
@@ -2364,6 +2498,34 @@ function syncPreparedSlots(){
     }
   });
 }
+function syncCurriculumPrepared(){
+  const sc = CH.spellcasting;
+  if(!sc.curriculumPrepared || typeof sc.curriculumPrepared !== 'object' || Array.isArray(sc.curriculumPrepared)){
+    sc.curriculumPrepared = emptyCurriculumPrepared();
+  }
+  SPELL_LEVELS.forEach(lvl=>{
+    const slot = sc.curriculumPrepared[lvl];
+    if(!slot || typeof slot !== 'object'){
+      sc.curriculumPrepared[lvl] = {spellId:null, expended:false};
+    } else if(lvl === 0){
+      slot.expended = false;
+    }
+  });
+}
+function curriculumSlotsOn(){
+  return !!(CH.curriculumEnabled && CH.spellcasting.type === 'prepared');
+}
+function cloneSpellEntry(sp){
+  return {
+    id: uid(),
+    name: (sp && sp.name) || 'Без названия',
+    level: sp && sp.level,
+    tradition: (sp && sp.tradition) || '',
+    desc: (sp && sp.desc) || '',
+    traits: Array.isArray(sp && sp.traits) ? sp.traits.map(t => Object.assign({}, t)) : [],
+    cast: normalizeCastCost(sp && sp.cast),
+  };
+}
 function preparedSlotsAt(lvl){
   return (CH.spellcasting.prepared[lvl] || []);
 }
@@ -2393,6 +2555,14 @@ function togglePreparedSlot(lvl, idx){
   if(!slot || !slot.spellId) return false;
   slot.expended = !slot.expended;
   syncPreparedSlots();
+  return slot.expended;
+}
+function toggleCurriculumSlot(lvl){
+  lvl = Number(lvl);
+  if(lvl === 0) return false;
+  const slot = CH.spellcasting.curriculumPrepared && CH.spellcasting.curriculumPrepared[lvl];
+  if(!slot || !slot.spellId) return false;
+  slot.expended = !slot.expended;
   return slot.expended;
 }
 
@@ -2453,25 +2623,35 @@ function wireCastPicker(){
   });
 }
 
-function preparedCardHtml(lvl, idx, slot){
+function preparedCardHtml(lvl, idx, slot, opts){
+  opts = opts || {};
   if(!slot || !slot.spellId) return '';
-  const sp = CH.books.spellbook.find(s=>s.id===slot.spellId);
+  const list = opts.curriculum ? (CH.books.curriculum || []) : CH.books.spellbook;
+  const sp = list.find(s=>s.id===slot.spellId);
   if(!sp) return '';
   const canSpend = Number(lvl) >= 1;
   const spent = canSpend && slot.expended;
   const castRank = Number(lvl) === 0 ? autoHeightenRank(CH.level) : Number(lvl);
-  const extra = Number(lvl) === 0
-    ? `${castRank} круг`
-    : `Ячейка ${idx+1}${Number(sp.level) < castRank ? ' · усилено до ' + castRank : ''}`;
+  let extra;
+  if(opts.curriculum){
+    extra = Number(lvl) === 0
+      ? `Учебный план · ${castRank} круг`
+      : `Учебный план${Number(sp.level) < castRank ? ' · усилено до ' + castRank : ''}`;
+  } else {
+    extra = Number(lvl) === 0
+      ? `${castRank} круг`
+      : `Ячейка ${idx+1}${Number(sp.level) < castRank ? ' · усилено до ' + castRank : ''}`;
+  }
+  const castAttr = opts.curriculum ? `data-curr-cast="${lvl}"` : `data-prep-cast="${lvl}|${idx}"`;
   return `
-    <div class="list-item ${spent ? 'spent' : ''}">
+    <div class="list-item ${spent ? 'spent' : ''}${opts.curriculum ? ' curr-item' : ''}">
       <div class="list-item-head">
-        <div ${canSpend ? `data-prep-cast="${lvl}|${idx}" style="flex:1;min-width:0;cursor:pointer;"` : 'style="flex:1;min-width:0;"'}>
+        <div ${canSpend ? `${castAttr} style="flex:1;min-width:0;cursor:pointer;"` : 'style="flex:1;min-width:0;"'}>
           ${spellNameRowHtml(sp)}
           <div class="tag">${escapeHtml(extra)}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>
           ${tagsMetaHtml(sp.traits)}
         </div>
-        ${canSpend ? `<button type="button" class="spent-badge" data-prep-cast="${lvl}|${idx}">${spent ? 'потрачено' : 'готово'}</button>` : ''}
+        ${canSpend ? `<button type="button" class="spent-badge" ${castAttr}>${spent ? 'потрачено' : 'готово'}</button>` : ''}
         <button type="button" class="chev-btn" data-item-toggle aria-label="Описание">
           <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
         </button>
@@ -2483,6 +2663,7 @@ function preparedCardHtml(lvl, idx, slot){
 function renderSpellsTab(){
   const sc = CH.spellcasting;
   syncPreparedSlots();
+  syncCurriculumPrepared();
   const mod = CH.abilities[sc.ability].mod;
   const dc = 10 + mod + profTotal(sc.proficiency, CH.level);
   const atk = mod + profTotal(sc.proficiency, CH.level);
@@ -2494,37 +2675,46 @@ function renderSpellsTab(){
 
   const slotsConfig = SPELL_LEVELS.map(lvl=>`
     <div class="stat-box" style="padding:6px 4px;">
-      <div class="lbl">${lvl===0?'Заг.':'Ур.'+lvl}</div>
+      <div class="lbl">${lvl===0?'Фок.':'Ур.'+lvl}</div>
       <input type="number" min="0" data-slot-max="${lvl}" value="${sc.slotsMax[lvl]||0}">
     </div>
   `).join('');
 
   const spendRanks = SPELL_LEVELS.filter(l => l >= 1 && Number(sc.slotsMax[l]) > 0);
+  const showCurrDots = isPlay() && curriculumSlotsOn();
   const dotsBody = spendRanks.map(lvl => {
     const max = Number(sc.slotsMax[lvl]||0);
     const used = Number(sc.slotsUsed[lvl]||0);
-    return `<div class="slot-row"><div class="lbl">${rankLabel(lvl)}</div>${slotDotsHtml('slot', String(lvl), max, used)}</div>`;
+    const extra = showCurrDots ? curriculumDotHtml(lvl) : '';
+    return `<div class="slot-row"><div class="lbl">${rankLabel(lvl)}</div>${slotDotsHtml('slot', String(lvl), max, used, null, extra)}</div>`;
   }).join('') || '<div class="empty-hint">Нет ячеек 1 круга и выше</div>';
 
   let castingBody = '';
   if(sc.type === 'spontaneous'){
     castingBody = dotsBody;
   } else if(sc.type === 'prepared'){
-    const bookOptions = (slotLvl, current)=>{
+    const spellSelectOptions = (list, slotLvl, current)=>{
       let o = `<option value="" ${!current?'selected':''}>— пусто —</option>`;
-      CH.books.spellbook.filter(sp => spellFitsPreparedSlot(sp, slotLvl)).forEach(sp=>{
+      (list || []).filter(sp => spellFitsPreparedSlot(sp, slotLvl)).forEach(sp=>{
         o += `<option value="${sp.id}" ${current===sp.id?'selected':''}>${escapeHtml(spellOptionLabel(sp))}</option>`;
       });
       return o;
     };
+    const showCurr = curriculumSlotsOn();
     castingBody = SPELL_LEVELS.filter(l=>Number(sc.slotsMax[l])>0).map(lvl=>{
       const slots = sc.prepared[lvl];
       const boxes = slots.map((slot,idx)=>`
         <div class="slot-box">
           <div>Ячейка ${idx+1}</div>
-          <select data-prep-slot="${lvl}|${idx}">${bookOptions(lvl, slot.spellId)}</select>
+          <select data-prep-slot="${lvl}|${idx}">${spellSelectOptions(CH.books.spellbook, lvl, slot.spellId)}</select>
         </div>`).join('');
-      return `<div style="margin-bottom:14px;"><div class="field-label" style="margin-bottom:6px;">${preparedGroupLabel(lvl)}</div><div class="slot-grid">${boxes}</div></div>`;
+      const cu = showCurr ? (sc.curriculumPrepared[lvl] || {spellId:null, expended:false}) : null;
+      const currBox = showCurr ? `
+        <div class="slot-box curr">
+          <div>Учебный план</div>
+          <select data-curr-slot="${lvl}">${spellSelectOptions(CH.books.curriculum, lvl, cu.spellId)}</select>
+        </div>` : '';
+      return `<div style="margin-bottom:14px;"><div class="field-label" style="margin-bottom:6px;">${preparedGroupLabel(lvl)}</div><div class="slot-grid">${boxes}${currBox}</div></div>`;
     }).join('') || '<div class="empty-hint">Настройте ячейки выше</div>';
   }
 
@@ -2536,8 +2726,9 @@ function renderSpellsTab(){
   if(sc.type === 'prepared'){
     preparedCardsHtml = SPELL_LEVELS.filter(l=>Number(sc.slotsMax[l])>0).map(lvl=>{
       const cards = (sc.prepared[lvl] || []).map((slot,idx)=>preparedCardHtml(lvl, idx, slot)).join('');
-      if(!cards.trim()) return '';
-      return `<div style="margin-bottom:12px;"><div class="field-label" style="margin-bottom:6px;">${preparedGroupLabel(lvl)}</div>${cards}</div>`;
+      const cuCard = curriculumSlotsOn() ? preparedCardHtml(lvl, 0, sc.curriculumPrepared[lvl], {curriculum:true}) : '';
+      if(!(cards + cuCard).trim()) return '';
+      return `<div style="margin-bottom:12px;"><div class="field-label" style="margin-bottom:6px;">${preparedGroupLabel(lvl)}</div>${cards}${cuCard}</div>`;
     }).join('');
     if(!preparedCardsHtml.trim()) preparedCardsHtml = '<div class="empty-hint">Нет подготовленных заклинаний — заполните ячейки в режиме настройки</div>';
   }
@@ -2580,10 +2771,10 @@ function renderSpellsTab(){
         ${isPlay() ? `
         <div class="play-id" style="margin-bottom:10px;">
           <div class="play-kv"><span>Тип</span>${escapeHtml(typeLabel)}</div>
-        </div>
-        <div class="row2" style="margin-bottom:10px;">
-          <div class="play-kv"><span>Характеристика</span>${escapeHtml(abilityLabel)}</div>
-          <div class="play-kv"><span>Владение</span>${escapeHtml(PROF_LABEL[sc.proficiency] || '')}</div>
+          <div class="row2" style="margin-top:8px;">
+            <div class="play-kv"><span>Характеристика</span>${escapeHtml(abilityLabel)}</div>
+            <div class="play-kv"><span>Владение</span>${escapeHtml(PROF_LABEL[sc.proficiency] || '')}</div>
+          </div>
         </div>` : `
         <div class="field"><label class="field-label">Тип заклинателя</label><select id="scType">${typeOptions}</select></div>
         <div class="row2">
@@ -2687,6 +2878,21 @@ function wireSpellsTab(){
         save(); renderApp();
         return;
       }
+      if(kind === 'curr'){
+        const slot = sc.curriculumPrepared && sc.curriculumPrepared[key];
+        if(!slot || !slot.spellId) return;
+        if(action === 'spend'){
+          if(slot.expended) return;
+          slot.expended = true;
+        } else {
+          if(!slot.expended) return;
+          slot.expended = false;
+        }
+        showToast(action === 'spend' ? ('Учебный план · ' + rankToast(key)) : ('Учебный план · ' + rankToast(key) + ' возвращён'), action === 'spend' ? 'accent' : 'info');
+        queueFlash(`[data-slot-dot^="curr|${key}|"]`, action === 'spend' ? 'bad' : 'good');
+        save(); renderApp();
+        return;
+      }
       const lvl = Number(key);
       const max = Number(sc.slotsMax[lvl]||0);
       if(sc.type === 'prepared' && lvl >= 1){
@@ -2714,6 +2920,16 @@ function wireSpellsTab(){
       save(); renderApp();
     });
   });
+  root.querySelectorAll('[data-curr-slot]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const lvl = sel.dataset.currSlot;
+      syncCurriculumPrepared();
+      sc.curriculumPrepared[lvl].spellId = sel.value || null;
+      sc.curriculumPrepared[lvl].expended = false;
+      sanitizeSpellAssignments(CH);
+      save(); renderApp();
+    });
+  });
   root.querySelectorAll('[data-prep-cast]').forEach(el=>{
     el.addEventListener('click', (e)=>{
       e.stopPropagation();
@@ -2721,6 +2937,16 @@ function wireSpellsTab(){
       const spent = togglePreparedSlot(lvl, idx);
       showToast(spent ? ('Ячейка ' + rankToast(lvl)) : ('Ячейка ' + rankToast(lvl) + ' возвращена'), spent ? 'accent' : 'info');
       queueFlash(`[data-slot-dot^="slot|${lvl}|"]`, spent ? 'bad' : 'good');
+      save(); renderApp();
+    });
+  });
+  root.querySelectorAll('[data-curr-cast]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const lvl = el.dataset.currCast;
+      const spent = toggleCurriculumSlot(lvl);
+      showToast(spent ? ('Учебный план · ' + rankToast(lvl)) : ('Учебный план · ' + rankToast(lvl) + ' возвращён'), spent ? 'accent' : 'info');
+      queueFlash(`[data-slot-dot^="curr|${lvl}|"]`, spent ? 'bad' : 'good');
       save(); renderApp();
     });
   });
@@ -2744,15 +2970,52 @@ function wireSpellsTab(){
 }
 
 /* =========================================================================
-   TAB: КНИГИ (формулы + заклинания известные персонажу)
+   TAB: КНИГИ (заклинания, ритуалы, формулы)
    ========================================================================= */
-let booksSection = 'spellbook'; // 'spellbook' | 'formulas'
+let booksSection = 'spellbook'; // 'spellbook' | 'rituals' | 'formulas' | 'curriculum'
 
-function renderBooksTab(){
-  const spells = CH.books.spellbook.slice().sort((a,b)=>a.level-b.level || a.name.localeCompare(b.name,'ru'));
-  const formulas = CH.books.formulas.slice().sort((a,b)=>a.level-b.level || a.name.localeCompare(b.name,'ru'));
-
-  const spellItems = spells.map(sp=>`
+function isBookGroupCollapsed(key){
+  const map = CH.booksCollapsed && typeof CH.booksCollapsed === 'object' ? CH.booksCollapsed : {};
+  return map[key] !== false;
+}
+function openBookGroup(key){
+  if(!CH.booksCollapsed || typeof CH.booksCollapsed !== 'object') CH.booksCollapsed = {};
+  CH.booksCollapsed[key] = false;
+}
+function bookGroupHtml(key, title, count, inner){
+  if(!count) return '';
+  const collapsed = isBookGroupCollapsed(key);
+  return `
+    <div class="card book-group">
+      <div class="card-header" data-book-group="${escapeAttr(key)}">
+        <h3>${escapeHtml(title)} · ${count}</h3>
+        <svg class="chev ${collapsed ? '' : 'open'}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="card-body ${collapsed ? 'collapsed' : ''}">${inner}</div>
+    </div>`;
+}
+function spellBookGroupKeys(sp){
+  const keys = [];
+  if(spellHasCantripTrait(sp)) keys.push('cantrip');
+  if(spellHasFocusTrait(sp)) keys.push('focus');
+  if(!keys.length){
+    const lvl = Math.max(1, Math.min(10, Number(sp.level) || 1));
+    keys.push('rank:' + lvl);
+  }
+  return keys;
+}
+function spellBookCardHtml(sp){
+  return spellListCardHtml(sp, 'spellbook');
+}
+function spellListCardHtml(sp, kind){
+  const editAttr = kind === 'curriculum' ? 'data-edit-curr' : 'data-edit-spell';
+  const delAttr = kind === 'curriculum' ? 'data-del-curr' : 'data-del-spell';
+  const copyBtn = !isPlay()
+    ? (kind === 'curriculum'
+      ? `<button class="btn btn-sm" data-copy-to-book="${sp.id}">В книгу</button>`
+      : (CH.curriculumEnabled ? `<button class="btn btn-sm" data-copy-to-curr="${sp.id}">В учебный план</button>` : ''))
+    : '';
+  return `
     <div class="list-item">
       <div class="list-item-head" data-item-toggle>
         <div>${spellNameRowHtml(sp)}<div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
@@ -2760,53 +3023,161 @@ function renderBooksTab(){
       <div class="list-item-body">
         <div>${escapeHtml(sp.desc)||'Без описания'}</div>
         ${!isPlay() ? `<div class="list-item-actions">
-          <button class="btn btn-sm" data-edit-spell="${sp.id}">Изменить</button>
-          <button class="btn btn-sm btn-danger" data-del-spell="${sp.id}">Удалить</button>
+          <button class="btn btn-sm" ${editAttr}="${sp.id}">Изменить</button>
+          ${copyBtn}
+          <button class="btn btn-sm btn-danger" ${delAttr}="${sp.id}">Удалить</button>
         </div>` : ''}
       </div>
-    </div>`).join('') || '<div class="empty-hint">Книга заклинаний пуста</div>';
-
-  const formulaItems = formulas.map(f=>`
+    </div>`;
+}
+function ritualCardHtml(r){
+  return `
     <div class="list-item">
       <div class="list-item-head" data-item-toggle>
-        <div><div class="name">${escapeHtml(f.name)}</div><div class="tag">Уровень ${f.level}</div></div>
+        <div>
+          <div class="name">${escapeHtml(r.name)}</div>
+          <div class="tag">${escapeHtml(r.level + ' круг')}</div>
+          ${tagsMetaHtml(r.traits)}
+        </div>
       </div>
       <div class="list-item-body">
-        <div>${escapeHtml(f.note)||'Без описания'}</div>
+        <div>${escapeHtml(r.desc)||'Без описания'}</div>
         ${!isPlay() ? `<div class="list-item-actions">
-          <button class="btn btn-sm" data-edit-formula="${f.id}">Изменить</button>
-          <button class="btn btn-sm btn-danger" data-del-formula="${f.id}">Удалить</button>
+          <button class="btn btn-sm" data-edit-ritual="${r.id}">Изменить</button>
+          <button class="btn btn-sm btn-danger" data-del-ritual="${r.id}">Удалить</button>
         </div>` : ''}
       </div>
-    </div>`).join('') || '<div class="empty-hint">Книга формул пуста</div>';
-
+    </div>`;
+}
+function formulaCardHtml(item){
+  const rune = isFormulaRune(item);
+  const cat = (rune ? FORMULA_CATEGORY_LABELS.rune : ITEM_CATEGORY_LABELS[item.category]) || '';
+  const extra = rune
+    ? (RUNE_SLOT_LABELS[item.runeSlot] ? ' · ' + RUNE_SLOT_LABELS[item.runeSlot] : '')
+    : ' · объём ' + formatBulk(item.bulk);
   return `
-    ${renderTopbar('Книги', 'Формулы и заклинания')}
+    <div class="list-item">
+      <div class="list-item-head" data-item-toggle>
+        <div>
+          <div class="name">${escapeHtml(item.name)}</div>
+          <div class="tag">${escapeHtml(cat)}${escapeHtml(extra)}${item.note ? ' · ' + escapeHtml(item.note) : ''}</div>
+          ${rune ? '' : itemStatsHtml(item, {formula:true})}
+          ${tagsMetaHtml(item.traits)}
+        </div>
+      </div>
+      <div class="list-item-body">
+        <div>${item.desc ? escapeHtml(item.desc) : 'Без описания'}</div>
+        ${!isPlay() ? `<div class="list-item-actions">
+          <button class="btn btn-sm" data-edit-formula="${item.id}">Изменить</button>
+          ${rune ? '' : `<button class="btn btn-sm" data-copy-to-eq="${item.id}">В снаряжение</button>`}
+          <button class="btn btn-sm btn-danger" data-del-formula="${item.id}">Удалить</button>
+        </div>` : ''}
+      </div>
+    </div>`;
+}
+function spellListGroupsHtml(list, prefix, cardFn, emptyHint){
+  const byKey = {
+    cantrip: [],
+    focus: [],
+  };
+  for(let i=1;i<=10;i++) byKey['rank:'+i] = [];
+  (list || []).forEach(sp=>{
+    spellBookGroupKeys(sp).forEach(key=>{
+      if(byKey[key]) byKey[key].push(sp);
+    });
+  });
+  const order = ['cantrip','focus'].concat(Array.from({length:10}, (_,i)=>'rank:'+(i+1)));
+  const labels = { cantrip:'Фокусы', focus:'Фокальные' };
+  const html = order.map(key=>{
+    const items = (byKey[key] || []).slice().sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+    const title = labels[key] || (key.startsWith('rank:') ? (key.slice(5) + ' круг') : key);
+    return bookGroupHtml(prefix+key, title, items.length, items.map(cardFn).join(''));
+  }).join('');
+  return html.trim() ? html : `<div class="empty-hint">${emptyHint}</div>`;
+}
+function spellBookGroupsHtml(){
+  return spellListGroupsHtml(CH.books.spellbook || [], 'sp:', sp => spellListCardHtml(sp, 'spellbook'), 'Книга заклинаний пуста');
+}
+function curriculumGroupsHtml(){
+  return spellListGroupsHtml(CH.books.curriculum || [], 'cu:', sp => spellListCardHtml(sp, 'curriculum'), 'Учебный план пуст');
+}
+function ritualGroupsHtml(){
+  const byRank = {};
+  for(let i=1;i<=10;i++) byRank[i] = [];
+  (CH.books.rituals || []).forEach(r=>{
+    const lvl = Math.max(1, Math.min(10, Number(r.level)||1));
+    byRank[lvl].push(r);
+  });
+  const html = Array.from({length:10}, (_,i)=>i+1).map(lvl=>{
+    const list = byRank[lvl].slice().sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+    return bookGroupHtml('rt:'+lvl, lvl + ' круг', list.length, list.map(ritualCardHtml).join(''));
+  }).join('');
+  return html.trim() ? html : '<div class="empty-hint">Книга ритуалов пуста</div>';
+}
+function formulaGroupsHtml(){
+  const cats = Object.keys(FORMULA_CATEGORY_LABELS);
+  const byCat = {};
+  cats.forEach(c=> byCat[c] = []);
+  (CH.books.formulas || []).forEach(item=>{
+    const cat = normalizeFormulaCategory(item.category);
+    (byCat[cat] || byCat.other).push(item);
+  });
+  const html = cats.map(cat=>{
+    const list = byCat[cat].slice().sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+    return bookGroupHtml('fm:'+cat, FORMULA_CATEGORY_LABELS[cat], list.length, list.map(formulaCardHtml).join(''));
+  }).join('');
+  return html.trim() ? html : '<div class="empty-hint">Книга формул пуста</div>';
+}
+
+function renderBooksTab(){
+  if(booksSection === 'curriculum' && !CH.curriculumEnabled) booksSection = 'spellbook';
+  return `
+    ${renderTopbar('Книги', CH.curriculumEnabled ? 'Заклинания, учебный план, ритуалы и формулы' : 'Заклинания, ритуалы и формулы')}
     <div class="page active">
       <div class="section-tabs">
-        <div class="section-tab ${booksSection==='spellbook'?'active':''}" data-section="spellbook">Книга заклинаний</div>
-        <div class="section-tab ${booksSection==='formulas'?'active':''}" data-section="formulas">Книга формул</div>
+        <div class="section-tab ${booksSection==='spellbook'?'active':''}" data-section="spellbook">Заклинания</div>
+        ${CH.curriculumEnabled ? `<div class="section-tab ${booksSection==='curriculum'?'active':''}" data-section="curriculum">Учебный план</div>` : ''}
+        <div class="section-tab ${booksSection==='rituals'?'active':''}" data-section="rituals">Ритуалы</div>
+        <div class="section-tab ${booksSection==='formulas'?'active':''}" data-section="formulas">Формулы</div>
       </div>
       ${booksSection==='spellbook' ? `
         ${!isPlay() ? `<button class="btn btn-accent btn-block" id="addSpellBtn" style="margin-bottom:12px;">+ Добавить заклинание</button>` : ''}
-        ${spellItems}
+        ${spellBookGroupsHtml()}
+      ` : booksSection==='curriculum' ? `
+        ${!isPlay() ? `<button class="btn btn-accent btn-block" id="addCurriculumBtn" style="margin-bottom:12px;">+ Добавить в учебный план</button>` : ''}
+        ${curriculumGroupsHtml()}
+      ` : booksSection==='rituals' ? `
+        ${!isPlay() ? `<button class="btn btn-accent btn-block" id="addRitualBtn" style="margin-bottom:12px;">+ Добавить ритуал</button>` : ''}
+        ${ritualGroupsHtml()}
       ` : `
-        ${!isPlay() ? `<button class="btn btn-accent btn-block" id="addFormulaBtn" style="margin-bottom:12px;">+ Добавить формулу</button>` : ''}
-        ${formulaItems}
+        ${!isPlay() ? `<div class="eq-toolbar" style="margin-bottom:12px;">
+          <button class="btn btn-accent btn-block" id="addFormulaBtn">+ Добавить формулу</button>
+          <button class="btn btn-block" id="addRuneFormulaBtn">+ Формула руны</button>
+        </div>` : ''}
+        ${formulaGroupsHtml()}
       `}
     </div>
   `;
+}
+
+function storedSpellLevel(traits, raw){
+  if(isAutoHeightenSpell({traits: traits || []})) return Math.max(0, Number(raw)||0);
+  const n = Number(raw);
+  if(!Number.isFinite(n) || n < 1) return 1;
+  if(n > 10) return 10;
+  return Math.floor(n);
 }
 
 function spellFormHtml(sp){
   sp = sp || {name:'', level:1, tradition:'', desc:'', traits:[], cast:'2'};
   const auto = isAutoHeightenSpell(sp);
   const autoRank = autoHeightenRank(CH.level);
+  const levelVal = auto ? (sp.level || 0) : Math.max(1, Number(sp.level)||1);
   return `
     <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" value="${escapeAttr(sp.name)}"></div>
     ${castPickerHtml(sp.cast)}
     <div class="row2">
-      <div class="field" id="mfLevelField" style="${auto?'display:none':''}"><label class="field-label">Уровень</label><input type="number" min="0" max="10" id="mfLevel" value="${sp.level}"></div>
+      <div class="field" id="mfLevelField" style="${auto?'display:none':''}"><label class="field-label">Круг</label><input type="number" min="1" max="10" id="mfLevel" value="${levelVal}"></div>
       <div class="field" id="mfLevelAutoField" style="${auto?'':'display:none'}"><label class="field-label">Круг</label><div class="play-text" id="mfLevelAutoText">${autoRank} круг · от уровня персонажа</div></div>
       <div class="field"><label class="field-label">Традиция/школа</label><input type="text" id="mfTradition" value="${escapeAttr(sp.tradition)}"></div>
     </div>
@@ -2830,18 +3201,135 @@ function wireSpellForm(sp, onSave){
   wireCastPicker();
   byId('mfCancel').addEventListener('click', closeModal);
   byId('mfSave').addEventListener('click', ()=>{
-    onSave(tagEditor.getTags(), normalizeCastCost(byId('mfCast') && byId('mfCast').value));
+    const traits = tagEditor.getTags();
+    onSave(traits, normalizeCastCost(byId('mfCast') && byId('mfCast').value), storedSpellLevel(traits, byId('mfLevel') && byId('mfLevel').value));
     sanitizeSpellAssignments(CH);
     save(); closeModal(); renderApp();
   });
 }
-function formulaFormHtml(f){
-  f = f || {name:'', level:1, note:''};
+function ritualFormHtml(r){
+  r = r || {name:'', level:1, desc:'', traits:[]};
   return `
-    <div class="field"><label class="field-label">Название предмета</label><input type="text" id="mfName" value="${escapeAttr(f.name)}"></div>
-    <div class="field"><label class="field-label">Уровень</label><input type="number" min="0" id="mfLevel" value="${f.level}"></div>
-    <div class="field"><label class="field-label">Заметка</label><textarea id="mfDesc">${escapeHtml_(f.note)}</textarea></div>
+    <div class="field"><label class="field-label">Название</label><input type="text" id="mfName" value="${escapeAttr(r.name)}"></div>
+    <div class="field"><label class="field-label">Круг</label><input type="number" min="1" max="10" id="mfLevel" value="${Math.max(1, Number(r.level)||1)}"></div>
+    <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(r.desc)}</textarea></div>
+    <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
   `;
+}
+
+function emptyRuneFormula(){
+  return {
+    id: uid(),
+    libraryId: null,
+    name: '',
+    category: 'rune',
+    qty: 1,
+    bulk: 0,
+    location: 'formula',
+    note: '',
+    desc: '',
+    traits: [],
+    isCurrency: false,
+    custom: true,
+    runes: [],
+    runeSlot: 'weapon',
+    weapon: null,
+    armor: null,
+    shield: null,
+    consumable: null,
+    bag: null,
+  };
+}
+function runeFormulaFormHtml(item){
+  item = item || emptyRuneFormula();
+  const slot = item.runeSlot || 'weapon';
+  const slotOpts = Object.entries(RUNE_SLOT_LABELS).map(([id, label])=>
+    `<option value="${id}" ${slot===id?'selected':''}>${label}</option>`
+  ).join('');
+  return `
+    <div class="field">
+      <label class="field-label">Название</label>
+      <input type="text" id="mfName" data-library-id="${escapeAttr(item.libraryId || '')}" value="${escapeAttr(item.name)}" autocomplete="off">
+      <div id="mfRuneSuggestions" class="tag-suggestions"></div>
+      <div class="hint-line">Начните вводить название — появятся руны из библиотеки</div>
+    </div>
+    <div class="field"><label class="field-label">Для чего</label>
+      <select id="mfRuneSlot">${slotOpts}</select>
+    </div>
+    <div class="field"><label class="field-label">Описание</label><textarea id="mfDesc">${escapeHtml_(item.desc)}</textarea></div>
+    <div class="field"><label class="field-label">Дескрипторы</label><div id="mfTagsContainer"></div></div>
+  `;
+}
+function openRuneFormulaEditor(item, opts){
+  opts = opts || {};
+  const isNew = !!opts.isNew;
+  openModal(opts.title || 'Формула руны', runeFormulaFormHtml(item) + `
+    <div class="modal-actions">
+      <button class="btn btn-block" id="mfCancel">Отмена</button>
+      <button class="btn btn-accent btn-block" id="mfSave">${opts.saveLabel || 'Сохранить'}</button>
+    </div>
+  `, ()=>{
+    const tagEditor = createTagEditor(item.traits || []);
+    byId('mfTagsContainer').appendChild(tagEditor.el);
+    const nameInput = byId('mfName');
+    const box = byId('mfRuneSuggestions');
+    function renderSuggestions(){
+      const hits = searchLibraryRunes(nameInput.value);
+      box.innerHTML = '';
+      hits.forEach(entry=>{
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tag-suggestion';
+        const label = RUNE_SLOT_LABELS[entry.slot] || '';
+        btn.innerHTML = `<span>${escapeHtml(entry.name)}</span><small>${escapeHtml(label)}</small>`;
+        btn.addEventListener('click', ()=>{
+          nameInput.value = entry.name;
+          nameInput.dataset.libraryId = entry.id;
+          byId('mfRuneSlot').value = entry.slot;
+          byId('mfDesc').value = entry.desc || '';
+          item.libraryId = entry.id;
+          item.traits = (entry.traits || []).map(t => Object.assign({}, t));
+          byId('mfTagsContainer').innerHTML = '';
+          const nextEditor = createTagEditor(item.traits);
+          byId('mfTagsContainer').appendChild(nextEditor.el);
+          tagEditorRef.editor = nextEditor;
+          renderSuggestions();
+        });
+        box.appendChild(btn);
+      });
+    }
+    const tagEditorRef = { editor: tagEditor };
+    nameInput.addEventListener('input', ()=>{
+      nameInput.dataset.libraryId = '';
+      item.libraryId = null;
+      renderSuggestions();
+    });
+    byId('mfRuneSlot').addEventListener('change', renderSuggestions);
+    renderSuggestions();
+    byId('mfCancel').addEventListener('click', closeModal);
+    byId('mfSave').addEventListener('click', ()=>{
+      const editor = tagEditorRef.editor;
+      item.name = nameInput.value.trim() || 'Руна';
+      item.libraryId = nameInput.dataset.libraryId || item.libraryId || null;
+      item.category = 'rune';
+      item.qty = 1;
+      item.bulk = 0;
+      item.location = 'formula';
+      item.runeSlot = byId('mfRuneSlot').value || 'weapon';
+      item.desc = byId('mfDesc').value;
+      item.traits = editor.getTags();
+      item.runes = [];
+      item.weapon = item.armor = item.shield = item.consumable = item.bag = null;
+      if(!Array.isArray(CH.books.formulas)) CH.books.formulas = [];
+      if(isNew && !CH.books.formulas.some(entry=>entry.id === item.id)){
+        CH.books.formulas.push(item);
+      }
+      openBookGroup('fm:rune');
+      save();
+      closeModal();
+      renderApp();
+    });
+  });
 }
 
 function wireBooksTab(){
@@ -2851,14 +3339,24 @@ function wireBooksTab(){
   root.querySelectorAll('[data-section]').forEach(tab=>{
     tab.addEventListener('click', ()=>{ booksSection = tab.dataset.section; renderApp(); });
   });
+  root.querySelectorAll('[data-book-group]').forEach(h=>{
+    h.addEventListener('click', ()=>{
+      if(!CH.booksCollapsed || typeof CH.booksCollapsed !== 'object') CH.booksCollapsed = {};
+      const key = h.dataset.bookGroup;
+      CH.booksCollapsed[key] = !isBookGroupCollapsed(key);
+      save(); renderApp();
+    });
+  });
 
   const spellBtn = byId('addSpellBtn');
   if(spellBtn) spellBtn.addEventListener('click', ()=>{
     openModal('Новое заклинание', spellFormHtml() + `
       <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Добавить</button></div>
     `, ()=>{
-      wireSpellForm(null, (traits, cast)=>{
-        CH.books.spellbook.push({id:uid(), name:byId('mfName').value||'Без названия', level:Number(byId('mfLevel').value)||0, tradition:byId('mfTradition').value, desc:byId('mfDesc').value, traits, cast});
+      wireSpellForm(null, (traits, cast, level)=>{
+        const sp = {id:uid(), name:byId('mfName').value||'Без названия', level, tradition:byId('mfTradition').value, desc:byId('mfDesc').value, traits, cast};
+        CH.books.spellbook.push(sp);
+        openBookGroup('sp:' + spellBookGroupKeys(sp)[0]);
       });
     });
   });
@@ -2869,8 +3367,9 @@ function wireBooksTab(){
       openModal('Изменить заклинание', spellFormHtml(sp) + `
         <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Сохранить</button></div>
       `, ()=>{
-        wireSpellForm(sp, (traits, cast)=>{
-          sp.name=byId('mfName').value||sp.name; sp.level=Number(byId('mfLevel').value)||0;
+        wireSpellForm(sp, (traits, cast, level)=>{
+          sp.name=byId('mfName').value||sp.name;
+          sp.level=level;
           sp.tradition=byId('mfTradition').value; sp.desc=byId('mfDesc').value;
           sp.traits = traits;
           sp.cast = cast;
@@ -2890,31 +3389,164 @@ function wireBooksTab(){
     });
   });
 
-  const formulaBtn = byId('addFormulaBtn');
-  if(formulaBtn) formulaBtn.addEventListener('click', ()=>{
-    openModal('Новая формула', formulaFormHtml() + `
+  const currBtn = byId('addCurriculumBtn');
+  if(currBtn) currBtn.addEventListener('click', ()=>{
+    openModal('Новое заклинание учебного плана', spellFormHtml() + `
       <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Добавить</button></div>
     `, ()=>{
+      wireSpellForm(null, (traits, cast, level)=>{
+        const sp = {id:uid(), name:byId('mfName').value||'Без названия', level, tradition:byId('mfTradition').value, desc:byId('mfDesc').value, traits, cast};
+        if(!Array.isArray(CH.books.curriculum)) CH.books.curriculum = [];
+        CH.books.curriculum.push(sp);
+        openBookGroup('cu:' + spellBookGroupKeys(sp)[0]);
+      });
+    });
+  });
+  root.querySelectorAll('[data-edit-curr]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const sp = (CH.books.curriculum || []).find(x=>x.id===btn.dataset.editCurr);
+      if(!sp) return;
+      openModal('Изменить заклинание учебного плана', spellFormHtml(sp) + `
+        <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Сохранить</button></div>
+      `, ()=>{
+        wireSpellForm(sp, (traits, cast, level)=>{
+          sp.name=byId('mfName').value||sp.name;
+          sp.level=level;
+          sp.tradition=byId('mfTradition').value; sp.desc=byId('mfDesc').value;
+          sp.traits = traits;
+          sp.cast = cast;
+        });
+      });
+    });
+  });
+  root.querySelectorAll('[data-del-curr]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const id = btn.dataset.delCurr;
+      CH.books.curriculum = (CH.books.curriculum || []).filter(x=>x.id!==id);
+      const cu = CH.spellcasting.curriculumPrepared || {};
+      Object.keys(cu).forEach(lvl => {
+        if(cu[lvl] && cu[lvl].spellId === id){
+          cu[lvl].spellId = null;
+          cu[lvl].expended = false;
+        }
+      });
+      sanitizeSpellAssignments(CH);
+      save(); renderApp();
+    });
+  });
+  root.querySelectorAll('[data-copy-to-curr]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const sp = CH.books.spellbook.find(x=>x.id===btn.dataset.copyToCurr);
+      if(!sp) return;
+      if(!Array.isArray(CH.books.curriculum)) CH.books.curriculum = [];
+      const copy = cloneSpellEntry(sp);
+      CH.books.curriculum.push(copy);
+      openBookGroup('cu:' + spellBookGroupKeys(copy)[0]);
+      save(); renderApp();
+      showToast('Скопировано в учебный план');
+    });
+  });
+  root.querySelectorAll('[data-copy-to-book]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const sp = (CH.books.curriculum || []).find(x=>x.id===btn.dataset.copyToBook);
+      if(!sp) return;
+      const copy = cloneSpellEntry(sp);
+      CH.books.spellbook.push(copy);
+      openBookGroup('sp:' + spellBookGroupKeys(copy)[0]);
+      save(); renderApp();
+      showToast('Скопировано в книгу заклинаний');
+    });
+  });
+
+  const ritualBtn = byId('addRitualBtn');
+  if(ritualBtn) ritualBtn.addEventListener('click', ()=>{
+    openModal('Новый ритуал', ritualFormHtml() + `
+      <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Добавить</button></div>
+    `, ()=>{
+      const tagEditor = createTagEditor([]);
+      byId('mfTagsContainer').appendChild(tagEditor.el);
       byId('mfCancel').addEventListener('click', closeModal);
       byId('mfSave').addEventListener('click', ()=>{
-        CH.books.formulas.push({id:uid(), name:byId('mfName').value||'Без названия', level:Number(byId('mfLevel').value)||0, note:byId('mfDesc').value});
+        const level = storedSpellLevel([], byId('mfLevel').value);
+        CH.books.rituals.push({id:uid(), name:byId('mfName').value||'Без названия', level, desc:byId('mfDesc').value, traits:tagEditor.getTags()});
+        openBookGroup('rt:'+level);
         save(); closeModal(); renderApp();
       });
     });
   });
-  root.querySelectorAll('[data-edit-formula]').forEach(btn=>{
+  root.querySelectorAll('[data-edit-ritual]').forEach(btn=>{
     btn.addEventListener('click', (e)=>{
       e.stopPropagation();
-      const f = CH.books.formulas.find(x=>x.id===btn.dataset.editFormula);
-      openModal('Изменить формулу', formulaFormHtml(f) + `
+      const r = CH.books.rituals.find(x=>x.id===btn.dataset.editRitual);
+      openModal('Изменить ритуал', ritualFormHtml(r) + `
         <div class="modal-actions"><button class="btn btn-block" id="mfCancel">Отмена</button><button class="btn btn-accent btn-block" id="mfSave">Сохранить</button></div>
       `, ()=>{
+        const tagEditor = createTagEditor(r.traits||[]);
+        byId('mfTagsContainer').appendChild(tagEditor.el);
         byId('mfCancel').addEventListener('click', closeModal);
         byId('mfSave').addEventListener('click', ()=>{
-          f.name=byId('mfName').value||f.name; f.level=Number(byId('mfLevel').value)||0; f.note=byId('mfDesc').value;
+          r.name=byId('mfName').value||r.name;
+          r.level=storedSpellLevel([], byId('mfLevel').value);
+          r.desc=byId('mfDesc').value;
+          r.traits=tagEditor.getTags();
           save(); closeModal(); renderApp();
         });
       });
+    });
+  });
+  root.querySelectorAll('[data-del-ritual]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      CH.books.rituals = CH.books.rituals.filter(x=>x.id!==btn.dataset.delRitual);
+      save(); renderApp();
+    });
+  });
+
+  const formulaBtn = byId('addFormulaBtn');
+  if(formulaBtn) formulaBtn.addEventListener('click', ()=>{
+    const item = emptyCustomItem('other', uid);
+    item.location = 'formula';
+    item.qty = 1;
+    item.runes = [];
+    openItemEditor({
+      title: 'Новая формула',
+      item,
+      saveLabel: 'Добавить',
+      isNew: true,
+      formula: true,
+    });
+  });
+  const runeFormulaBtn = byId('addRuneFormulaBtn');
+  if(runeFormulaBtn) runeFormulaBtn.addEventListener('click', ()=>{
+    openRuneFormulaEditor(emptyRuneFormula(), {title: 'Новая формула руны', saveLabel: 'Добавить', isNew: true});
+  });
+  root.querySelectorAll('[data-edit-formula]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const item = CH.books.formulas.find(x=>x.id===btn.dataset.editFormula);
+      if(!item) return;
+      if(isFormulaRune(item)){
+        openRuneFormulaEditor(item, {title: 'Изменить формулу руны', saveLabel: 'Сохранить', isNew: false});
+        return;
+      }
+      openItemEditor({title: 'Изменить формулу', item, saveLabel: 'Сохранить', isNew: false, formula: true});
+    });
+  });
+  root.querySelectorAll('[data-copy-to-eq]').forEach(btn=>{
+    btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const item = (CH.books.formulas || []).find(x=>x.id===btn.dataset.copyToEq);
+      if(!item || isFormulaRune(item)) return;
+      const copy = cloneFormulaToEquipment(item);
+      if(!copy) return;
+      CH.equipment.items.push(copy);
+      save();
+      showToast('Добавлено в снаряжение (с собой)');
+      renderApp();
     });
   });
   root.querySelectorAll('[data-del-formula]').forEach(btn=>{
@@ -3642,10 +4274,17 @@ function renderSettingsTab(){
     ${renderTopbar('Настройки', '', {settings:true})}
     <div class="page active">
       <div class="card">
-        <div class="more-item" style="border:none;padding-top:0;">
+        <div class="more-item" style="padding-top:0;">
           <div><div class="t">Вкладка фамильяра</div><div class="d">Показать упрощённый лист связанного существа</div></div>
           <label class="switch">
             <input type="checkbox" id="familiarEnabledToggle" ${CH.familiarEnabled?'checked':''}>
+            <span class="switch-ui"></span>
+          </label>
+        </div>
+        <div class="more-item">
+          <div><div class="t">Учебный план</div><div class="d">Отдельный список и дополнительная ячейка там, где уже есть обычные</div></div>
+          <label class="switch">
+            <input type="checkbox" id="curriculumEnabledToggle" ${CH.curriculumEnabled?'checked':''}>
             <span class="switch-ui"></span>
           </label>
         </div>
@@ -3660,6 +4299,8 @@ function renderSettingsTab(){
           </select>
         </div>
         <button class="btn btn-accent btn-block" id="newCharacterBtn">+ Новый персонаж</button>
+        <button class="btn btn-danger btn-block" id="deleteCharacterBtn" ${profiles.length<=1?'disabled':''} style="margin-top:8px;">Удалить персонажа</button>
+        ${profiles.length<=1 ? '<div class="hint-line">Нельзя удалить единственного персонажа — есть сброс.</div>' : ''}
       </div>
       <div class="card">
         <div class="more-item">
@@ -3679,7 +4320,7 @@ function renderSettingsTab(){
         <div class="more-item" style="border:none;padding-top:0;">
           <div><div class="t">Автосохранение</div><div class="d">Данные хранятся локально в кэше браузера. Последнее сохранение: ${savedDate}</div></div>
         </div>
-        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.5</div>
+        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.9</div>
       </div>
     </div>
   `;
@@ -3698,6 +4339,13 @@ function wireSettingsTab(){
       CH.familiar.hpCollapsed = compact;
       CH.familiar.defensesCollapsed = compact;
     }
+    save();
+    renderApp();
+  });
+  const currToggle = byId('curriculumEnabledToggle');
+  if(currToggle) currToggle.addEventListener('change', ()=>{
+    CH.curriculumEnabled = currToggle.checked;
+    if(!CH.curriculumEnabled && booksSection === 'curriculum') booksSection = 'spellbook';
     save();
     renderApp();
   });
@@ -3721,6 +4369,22 @@ function wireSettingsTab(){
         showToast('Создан новый персонаж');
       });
     });
+  });
+  const delBtn = byId('deleteCharacterBtn');
+  if(delBtn) delBtn.addEventListener('click', ()=>{
+    const profiles = listCharacterProfiles();
+    if(profiles.length <= 1) return;
+    const active = profiles.find(p=>p.active) || profiles[0];
+    if(!confirm('Удалить персонажа «' + (active.name || 'Без имени') + '»? Это нельзя отменить.')) return;
+    const result = deleteCharacterProfile(active.id);
+    if(!result.ok){
+      showToast(result.reason === 'last' ? 'Нельзя удалить единственного персонажа' : 'Не удалось удалить', 'bad');
+      return;
+    }
+    CH = result.character;
+    activeTab = 'character';
+    renderApp();
+    showToast('Персонаж удалён');
   });
   byId('exportBtn').addEventListener('click', ()=>{
     const xml = characterToXml(CH);

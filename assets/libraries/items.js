@@ -12,6 +12,9 @@ export const ITEM_CATEGORY_LABELS = {
   bag: 'Сумка',
   other: 'Разное',
 };
+export const FORMULA_CATEGORY_LABELS = Object.assign({}, ITEM_CATEGORY_LABELS, {
+  rune: 'Руны',
+});
 
 export const ON_PERSON_LOCATIONS = ['worn', 'belt', 'equipped-armor', 'equipped-shield'];
 const WEAPON_PROF_RANKS = ['untrained', 'trained', 'expert', 'master', 'legendary'];
@@ -217,6 +220,13 @@ export function getLibraryItem(id){
 export function normalizeCategory(value){
   const key = String(value || 'other').toLowerCase();
   return ITEM_CATEGORY_LABELS[key] ? key : 'other';
+}
+export function normalizeFormulaCategory(value){
+  const key = String(value || 'other').toLowerCase();
+  return FORMULA_CATEGORY_LABELS[key] ? key : 'other';
+}
+export function isFormulaRune(item){
+  return !!(item && normalizeFormulaCategory(item.category) === 'rune');
 }
 
 export function parseStatNumber(value){

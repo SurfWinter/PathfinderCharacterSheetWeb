@@ -216,9 +216,9 @@ function copyRuneTraits(traits){
 export function searchLibraryRunes(query, opts={}){
   const slot = normalizeRuneSlot(opts.slot);
   const q = String(query || '').trim().toLocaleLowerCase('ru');
-  if(!slot || !q) return [];
+  if(!q) return [];
   return RUNE_LIBRARY.filter(rune=>{
-    if(rune.slot !== slot) return false;
+    if(slot && rune.slot !== slot) return false;
     return rune.name.toLocaleLowerCase('ru').includes(q);
   }).slice(0, 8);
 }

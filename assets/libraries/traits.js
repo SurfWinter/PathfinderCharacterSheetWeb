@@ -191,7 +191,7 @@ export function autoHeightenRank(characterLevel){
 
 export function spellDisplayRank(spell, characterLevel){
   if(isAutoHeightenSpell(spell)) return autoHeightenRank(characterLevel);
-  return Math.max(0, Number(spell && spell.level) || 0);
+  return Math.max(1, Number(spell && spell.level) || 1);
 }
 
 export function spellFitsPreparedSlot(spell, slotLevel){

@@ -1,6 +1,7 @@
 // Состояние персонажа, миграции и локальное хранилище.
-import { bagCompartmentLocation, getLibraryItem, instantiateLibraryItem, isBagItem, normalizeArmorData, normalizeBagData, normalizeCategory, normalizeShieldData, normalizeWeaponData } from './libraries/items.js';
-import { matchLibraryTrait, spellFitsFocusList, spellFitsPreparedSlot } from './libraries/traits.js';
+import { bagCompartmentLocation, getLibraryItem, instantiateLibraryItem, isBagItem, isFormulaRune, normalizeArmorData, normalizeBagData, normalizeCategory, normalizeShieldData, normalizeWeaponData } from './libraries/items.js';
+import { matchLibraryTrait, spellFitsFocusList, spellFitsPreparedSlot, spellHasCantripTrait, spellHasFocusTrait } from './libraries/traits.js';
+import { normalizeRuneSlot } from './libraries/runes.js';
 
 const STORAGE_KEY = 'pf2_character_v1'; // прежний ключ: используется только для миграции
 const PROFILES_STORAGE_KEY = 'pf2_character_profiles_v1';
@@ -91,6 +92,14 @@ function defaultFamiliar(){
   };
 }
 
+function emptyCurriculumPrepared(){
+  const slots = {};
+  for(let lvl = 0; lvl <= 10; lvl++){
+    slots[lvl] = {spellId:null, expended:false};
+  }
+  return slots;
+}
+
 function defaultCharacter(){
   return {
     meta:{ savedAt: Date.now() },
@@ -142,14 +151,19 @@ function defaultCharacter(){
       slotsMax:{0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0},
       slotsUsed:{0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0,10:0},
       prepared:{}, // level -> [ {spellId|null, expended} ]
+      curriculumPrepared: emptyCurriculumPrepared(),
       focus:{ spellIds:[], used:0, max:1 }, // фокальные заклинания; max правится в настройке
     },
     books:{
-      formulas: [], // {id,name,level,note}
+      formulas: [], // предметы-формулы и формулы рун
+      rituals: [], // {id,name,level,desc,traits}
       spellbook: [], // {id,name,level,tradition,desc,traits,cast}
+      curriculum: [], // учебный план, та же форма что spellbook
     },
+    booksCollapsed: {},
     feats: [], // {id,name,level,category,desc,traits}
     familiarEnabled: false,
+    curriculumEnabled: false,
     familiar: defaultFamiliar(),
   };
 }
@@ -305,24 +319,6 @@ function migrateEquipment(equipment){
   const storageIds = new Set(storages.map(storage=>storage.id));
   let items = (Array.isArray(source.items) ? source.items : []).map(normalizeEquipmentItem).filter(Boolean);
 
-  items = items.map(item=>{
-    if(item.isCurrency || isBagItem(item)) return item;
-    if(!/^рюкзак$/i.test(String(item.name || '').trim())) return item;
-    const bag = instantiateLibraryItem(getLibraryItem('backpack'), uid);
-    bag.id = item.id;
-    bag.note = item.note || '';
-    bag.desc = item.desc || bag.desc;
-    bag.traits = item.traits && item.traits.length ? item.traits : bag.traits;
-    let loc = item.location || 'worn';
-    if(loc === 'carried' || String(loc).startsWith('bag:')) loc = 'worn';
-    bag.location = loc;
-    return bag;
-  }).filter(item=>{
-    if(item.isCurrency) return true;
-    const looksLikeHackPack = !isBagItem(item) && /рюкзак/i.test(item.name || '') && Number(item.bulk) < 0;
-    return !looksLikeHackPack;
-  });
-
   if(!items.some(isBagItem)){
     items.push(instantiateLibraryItem(getLibraryItem('backpack'), uid));
   }
@@ -392,15 +388,116 @@ export function normalizeCastCost(value){
   if(v === '1-3' || v === '1–3') return '1-3';
   return '2';
 }
+function clampSpellRank(value){
+  const n = Number(value);
+  if(!Number.isFinite(n) || n < 1) return 1;
+  if(n > 10) return 10;
+  return Math.floor(n);
+}
+function migrateSpellEntry(spell){
+  const next = Object.assign({}, spell, {
+    traits: normalizeTraits(spell && spell.traits),
+    cast: normalizeCastCost(spell && spell.cast),
+  });
+  if(!spellHasCantripTrait(next) && !spellHasFocusTrait(next)){
+    next.level = clampSpellRank(next.level);
+  }
+  return next;
+}
+function migrateRitual(raw){
+  raw = raw || {};
+  return {
+    id: raw.id || uid(),
+    name: raw.name || 'Без названия',
+    level: clampSpellRank(raw.level),
+    desc: raw.desc || '',
+    traits: normalizeTraits(raw.traits),
+  };
+}
+function migrateRuneFormula(raw){
+  raw = raw || {};
+  return {
+    id: raw.id || uid(),
+    libraryId: raw.libraryId || null,
+    name: raw.name || 'Руна',
+    category: 'rune',
+    qty: 1,
+    bulk: 0,
+    location: 'formula',
+    note: raw.note || '',
+    desc: raw.desc || '',
+    traits: normalizeTraits(raw.traits),
+    isCurrency: false,
+    custom: true,
+    runes: [],
+    runeSlot: normalizeRuneSlot(raw.runeSlot) || 'weapon',
+    weapon: null,
+    armor: null,
+    shield: null,
+    consumable: null,
+    bag: null,
+  };
+}
+function migrateFormulaItem(raw){
+  if(!raw || raw.isCurrency) return null;
+  if(isFormulaRune(raw) || raw.runeSlot){
+    return migrateRuneFormula(raw);
+  }
+  const looksLikeItem = !!(raw.category || raw.libraryId || raw.weapon || raw.armor || raw.shield || raw.bag || raw.consumable);
+  if(!looksLikeItem){
+    return {
+      id: raw.id || uid(),
+      libraryId: null,
+      name: raw.name || 'Без названия',
+      category: 'other',
+      qty: 1,
+      bulk: 0,
+      location: 'formula',
+      note: '',
+      desc: raw.desc || raw.note || '',
+      traits: normalizeTraits(raw.traits),
+      isCurrency: false,
+      custom: true,
+      runes: [],
+      weapon: null,
+      armor: null,
+      shield: null,
+      consumable: null,
+      bag: null,
+    };
+  }
+  const item = normalizeEquipmentItem(raw);
+  if(!item || item.isCurrency) return null;
+  item.qty = 1;
+  item.bulk = Number(raw.bulk != null ? raw.bulk : item.bulk) || 0;
+  item.location = 'formula';
+  item.runes = [];
+  delete item.shieldHpCurrent;
+  delete item.runeSlot;
+  return item;
+}
 function migrateBooks(books){
   const defaults = defaultCharacter().books;
-  return Object.assign(defaults, books||{}, {
-    formulas: Array.isArray(books && books.formulas) ? books.formulas : [],
-    spellbook: Array.isArray(books && books.spellbook) ? books.spellbook.map(spell=>Object.assign({}, spell, {
-      traits: normalizeTraits(spell.traits),
-      cast: normalizeCastCost(spell.cast),
-    })) : [],
+  const src = books && typeof books === 'object' ? books : {};
+  return Object.assign({}, defaults, src, {
+    formulas: Array.isArray(src.formulas) ? src.formulas.map(migrateFormulaItem).filter(Boolean) : [],
+    rituals: Array.isArray(src.rituals) ? src.rituals.map(migrateRitual) : [],
+    spellbook: Array.isArray(src.spellbook) ? src.spellbook.map(migrateSpellEntry) : [],
+    curriculum: Array.isArray(src.curriculum) ? src.curriculum.map(migrateSpellEntry) : [],
   });
+}
+function migrateCurriculumPrepared(raw){
+  const next = emptyCurriculumPrepared();
+  if(!raw || typeof raw !== 'object' || Array.isArray(raw)) return next;
+  for(let lvl = 0; lvl <= 10; lvl++){
+    const slot = raw[lvl];
+    if(!slot || typeof slot !== 'object') continue;
+    next[lvl] = {
+      spellId: slot.spellId || null,
+      expended: lvl === 0 ? false : !!slot.expended,
+    };
+  }
+  return next;
 }
 function migrateSpellcasting(raw){
   const base = defaultCharacter().spellcasting;
@@ -429,6 +526,7 @@ function migrateSpellcasting(raw){
     slotsMax,
     slotsUsed,
     prepared,
+    curriculumPrepared: migrateCurriculumPrepared(raw.curriculumPrepared),
     focus: { spellIds, used, max },
   });
 }
@@ -437,6 +535,8 @@ function sanitizeSpellAssignments(character){
   if(!character) return character;
   const book = (character.books && character.books.spellbook) || [];
   const byId = new Map(book.map(spell => [spell.id, spell]));
+  const curriculum = (character.books && character.books.curriculum) || [];
+  const cuById = new Map(curriculum.map(spell => [spell.id, spell]));
   const sc = character.spellcasting;
   if(!sc) return character;
   const prepared = sc.prepared && typeof sc.prepared === 'object' ? sc.prepared : {};
@@ -450,6 +550,17 @@ function sanitizeSpellAssignments(character){
         slot.expended = false;
       }
     });
+  });
+  if(!sc.curriculumPrepared || typeof sc.curriculumPrepared !== 'object'){
+    sc.curriculumPrepared = emptyCurriculumPrepared();
+  }
+  Object.keys(sc.curriculumPrepared).forEach(lvl => {
+    const slot = sc.curriculumPrepared[lvl];
+    if(!slot || !slot.spellId) return;
+    if(!spellFitsPreparedSlot(cuById.get(slot.spellId), Number(lvl))){
+      slot.spellId = null;
+      slot.expended = false;
+    }
   });
   if(sc.focus && Array.isArray(sc.focus.spellIds)){
     sc.focus.spellIds = sc.focus.spellIds.filter(id => spellFitsFocusList(byId.get(id)));
@@ -524,7 +635,9 @@ function normalizeCharacter(parsed){
     defensesCollapsed: parsed.defensesCollapsed != null ? !!parsed.defensesCollapsed : parsed.mode === 'play',
     perceptionCollapsed: parsed.perceptionCollapsed != null ? !!parsed.perceptionCollapsed : parsed.mode === 'play',
     familiarEnabled: !!parsed.familiarEnabled,
+    curriculumEnabled: !!parsed.curriculumEnabled,
     familiar: migrateFamiliar(parsed.familiar),
+    booksCollapsed: parsed.booksCollapsed && typeof parsed.booksCollapsed === 'object' ? parsed.booksCollapsed : {},
   });
   return sanitizeSpellAssignments(character);
 }
@@ -597,6 +710,20 @@ export function createCharacterProfile(name=''){
   sessionStorage.setItem(ACTIVE_PROFILE_SESSION_KEY, profile.id);
   return character;
 }
+export function deleteCharacterProfile(id){
+  const state = loadProfilesState();
+  if(state.profiles.length <= 1) return {ok:false, reason:'last', character:loadCharacter()};
+  const kept = state.profiles.filter(profile => profile.id !== id);
+  if(kept.length === state.profiles.length) return {ok:false, reason:'missing', character:loadCharacter()};
+  const activeId = activeProfileId(state);
+  state.profiles = kept;
+  saveProfilesState(state);
+  if(activeId === id){
+    sessionStorage.setItem(ACTIVE_PROFILE_SESSION_KEY, kept[0].id);
+    return {ok:true, character:normalizeCharacter(kept[0].character)};
+  }
+  return {ok:true, character:loadCharacter()};
+}
 
 
-export { ABILITY_DEFS, defaultCharacter, normalizeCharacter, loadCharacter, sanitizeSpellAssignments };
+export { ABILITY_DEFS, defaultCharacter, emptyCurriculumPrepared, normalizeCharacter, loadCharacter, sanitizeSpellAssignments };
