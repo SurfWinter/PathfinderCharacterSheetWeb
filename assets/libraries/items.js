@@ -158,7 +158,7 @@ export const ITEM_LIBRARY = [
     id: 'expClothing',
     name: 'Одежда исследователя',
     category: 'armor',
-    bulk: 4,
+    bulk: 0.1,
     traits: [
       { type: 'library', id: 'comfort' },
     ],
