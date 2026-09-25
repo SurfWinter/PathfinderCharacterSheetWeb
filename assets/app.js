@@ -556,13 +556,13 @@ function renderCharacterTab(){
           <div class="field">
             <label class="field-label">Внешность</label>
             ${CH.appearance && CH.appearance.trim()
-              ? `<div class="play-text">${escapeHtml(CH.appearance)}</div>`
+              ? `<div class="play-text">${formatRichText(CH.appearance)}</div>`
               : `<div class="empty-hint" style="padding:2px 0;">Нет внешности</div>`}
           </div>
           <div class="field" style="margin-bottom:0;">
             <label class="field-label">Заметки</label>
             ${CH.notes && CH.notes.trim()
-              ? `<div class="play-text">${escapeHtml(CH.notes)}</div>`
+              ? `<div class="play-text">${formatRichText(CH.notes)}</div>`
               : `<div class="empty-hint" style="padding:2px 0;">Нет заметок</div>`}
           </div>` : `
           <div class="field"><label class="field-label">Внешность</label><textarea class="autosize" id="charAppearance">${escapeHtml_(CH.appearance)}</textarea></div>
@@ -743,6 +743,11 @@ function resistChipHtml(r){
 }
 function escapeAttr(s){ return String(s??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function escapeHtml(s){ return escapeAttr(s).replace(/\n/g,'<br>'); }
+function formatRichText(s){
+  return escapeHtml(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/_([^_]+)_/g, '<em>$1</em>');
+}
 function bindAutosize(el){
   if(!el) return;
   const fit = ()=>{
@@ -1244,7 +1249,7 @@ function actionListItemHtml(a){
         <button class="fav-star ${a.favorite?'active':''}" data-fav-toggle="${a.id}" title="${a.favorite?'Убрать из избранного':'Добавить в избранное'}">${a.favorite?'★':'☆'}</button>
       </div>
       <div class="list-item-body">
-        <div>${escapeHtml(a.desc)}</div>
+        <div>${formatRichText(a.desc)}</div>
         ${!isPlay() ? `
         <div class="list-item-actions">
           <button class="btn btn-sm" data-edit-action="${a.id}">Изменить</button>
@@ -1505,10 +1510,10 @@ function runesHtml(item){
 }
 function itemDescriptionHtml(item){
   const blocks = [];
-  if(item.desc) blocks.push(`<div>${escapeHtml(item.desc)}</div>`);
+  if(item.desc) blocks.push(`<div>${formatRichText(item.desc)}</div>`);
   (item.runes || []).forEach(rune=>{
     const name = escapeHtml(rune.name || 'Руна');
-    const desc = rune.desc ? `<div>${escapeHtml(rune.desc)}</div>` : '';
+    const desc = rune.desc ? `<div>${formatRichText(rune.desc)}</div>` : '';
     blocks.push(`<div class="rune-desc-block"><div class="rune-desc-name">${name}</div>${desc}</div>`);
   });
   return blocks.length ? blocks.join('') : 'Нет описания';
@@ -1652,10 +1657,10 @@ function bagCardHtml(bag){
       </div>
       ${play ? `
       <div class="bag-play-body">
-        <div class="bag-desc open">${bag.desc ? escapeHtml(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
+        <div class="bag-desc open">${bag.desc ? formatRichText(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
         ${compartments}
       </div>` : `
-      <div class="bag-desc">${bag.desc ? escapeHtml(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
+      <div class="bag-desc">${bag.desc ? formatRichText(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
       ${compartments}`}
     </div>`;
 }
@@ -2656,7 +2661,7 @@ function preparedCardHtml(lvl, idx, slot, opts){
           <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
         </button>
       </div>
-      <div class="list-item-body">${escapeHtml(sp.desc)||'Без описания'}</div>
+      <div class="list-item-body">${formatRichText(sp.desc)||'Без описания'}</div>
     </div>`;
 }
 
@@ -2745,7 +2750,7 @@ function renderSpellsTab(){
         </button>
       </div>
       <div class="list-item-body">
-        <div>${escapeHtml(sp.desc)||'Без описания'}</div>
+        <div>${formatRichText(sp.desc)||'Без описания'}</div>
         ${!isPlay() ? `<div class="list-item-actions"><button class="btn btn-sm btn-danger" data-focus-remove="${id}">Убрать из фокальных</button></div>` : ''}
       </div>
     </div>`;
@@ -3021,7 +3026,7 @@ function spellListCardHtml(sp, kind){
         <div>${spellNameRowHtml(sp)}<div class="tag">${escapeHtml(spellRankText(sp))}${sp.tradition?' · '+escapeHtml(sp.tradition):''}</div>${tagsMetaHtml(sp.traits)}</div>
       </div>
       <div class="list-item-body">
-        <div>${escapeHtml(sp.desc)||'Без описания'}</div>
+        <div>${formatRichText(sp.desc)||'Без описания'}</div>
         ${!isPlay() ? `<div class="list-item-actions">
           <button class="btn btn-sm" ${editAttr}="${sp.id}">Изменить</button>
           ${copyBtn}
@@ -3041,7 +3046,7 @@ function ritualCardHtml(r){
         </div>
       </div>
       <div class="list-item-body">
-        <div>${escapeHtml(r.desc)||'Без описания'}</div>
+        <div>${formatRichText(r.desc)||'Без описания'}</div>
         ${!isPlay() ? `<div class="list-item-actions">
           <button class="btn btn-sm" data-edit-ritual="${r.id}">Изменить</button>
           <button class="btn btn-sm btn-danger" data-del-ritual="${r.id}">Удалить</button>
@@ -3066,7 +3071,7 @@ function formulaCardHtml(item){
         </div>
       </div>
       <div class="list-item-body">
-        <div>${item.desc ? escapeHtml(item.desc) : 'Без описания'}</div>
+        <div>${item.desc ? formatRichText(item.desc) : 'Без описания'}</div>
         ${!isPlay() ? `<div class="list-item-actions">
           <button class="btn btn-sm" data-edit-formula="${item.id}">Изменить</button>
           ${rune ? '' : `<button class="btn btn-sm" data-copy-to-eq="${item.id}">В снаряжение</button>`}
@@ -3569,7 +3574,7 @@ function renderFeatsTab(){
         <div><div class="name">${escapeHtml(f.name)}</div><div class="tag">Ур. ${f.level}${f.category?' · '+escapeHtml(f.category):''}</div>${tagsMetaHtml(f.traits)}</div>
       </div>
       <div class="list-item-body">
-        <div>${escapeHtml(f.desc)||'Без описания'}</div>
+        <div>${formatRichText(f.desc)||'Без описания'}</div>
         ${!isPlay() ? `
         <div class="list-item-actions">
           <button class="btn btn-sm" data-edit-feat="${f.id}">Изменить</button>
@@ -3711,7 +3716,7 @@ function renderFamiliarTab(){
         <div><div class="name">${escapeHtml(ab.name||'Без названия')}</div>${meta}</div>
       </div>
       <div class="list-item-body">
-        <div>${escapeHtml(ab.desc)||'Без описания'}</div>
+        <div>${formatRichText(ab.desc)||'Без описания'}</div>
         ${!isPlay() ? `
         <div class="list-item-actions">
           <button class="btn btn-sm" data-edit-fam-ability="${ab.id}">Изменить</button>
@@ -3896,7 +3901,7 @@ function renderFamiliarTab(){
       <div class="card">
         <h3 style="margin-bottom:8px;">Заметки</h3>
         ${isPlay()
-          ? (F.notes && F.notes.trim() ? `<div class="play-text">${escapeHtml(F.notes)}</div>` : `<div class="empty-hint">Нет заметок</div>`)
+          ? (F.notes && F.notes.trim() ? `<div class="play-text">${formatRichText(F.notes)}</div>` : `<div class="empty-hint">Нет заметок</div>`)
           : `<textarea class="autosize" id="famNotes">${escapeHtml_(F.notes)}</textarea>`}
       </div>
     </div>
