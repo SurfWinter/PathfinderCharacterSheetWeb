@@ -170,7 +170,11 @@ export const ITEM_LIBRARY = [
 
   {
     id: 'healingPotionLvl1',
+<<<<<<< HEAD
     name: 'низшее зелье исцеления',
+=======
+    name: 'Зелье исцеления',
+>>>>>>> faeefcdaed182dcaead83df9aa09aba752829c22
     category: 'consumable',
     bulk: 0.1,
     traits: [
@@ -188,6 +192,7 @@ export const ITEM_LIBRARY = [
   },
 
   {
+<<<<<<< HEAD
     id: 'healingPotionLvl3',
     name: 'Малое елье исцеления',
     category: 'consumable',
@@ -207,6 +212,8 @@ export const ITEM_LIBRARY = [
   },
 
   {
+=======
+>>>>>>> faeefcdaed182dcaead83df9aa09aba752829c22
     id: 'masqueradeScarf',
     name: 'Платок маскировки',
     category: 'gear',
