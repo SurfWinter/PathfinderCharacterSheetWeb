@@ -13,8 +13,7 @@ export const TRAIT_LIBRARY = [
   { id:'move', name:'Движение', color:'default', category:'Общее' },
   { id:'concentrate', name:'Концентрация', color:'default', category:'Общее' },
   { id:'manipulate', name:'Манипуляция', color:'default', category:'Общее' },
-  { id:'sanctified', name:'Освящённый', color:'silver', category:'Освящённое' },
-  { id:'holy', name:'Священный', color:'gold', category:'Освящённое' },
+
   { id:'mage', name:'Маг', color:'purple', category:'Персонаж' },
   { id:'magic', name:'Магический', color:'purple', category:'Разное' },
   { id:'extradimensional', name:'Межпространственный', color:'deepBlue', category:'Разное' },
@@ -23,6 +22,11 @@ export const TRAIT_LIBRARY = [
   { id:'bulwark', name:'Закрытая', color:'silver', category:'Броня' },
   { id:'consumable', name:'Одноразовый', color:'default', category:'Предметы' },
   { id:'potion', name:'Зелье', color:'default', category:'Эффект' },
+
+  //Освящённое
+  { id:'sanctified', name:'Освящённый', color:'silver', category:'Освящённое' },
+  { id:'holy', name:'Священный', color:'gold', category:'Освящённое' },
+  { id:'unholy', name:'Нечестивый', color:'void', category:'Освящённое' },
 
   // Расы и типы существ
   { id:'human', name:'Человек', color:'silver', category:'Персонаж' },
@@ -90,6 +94,9 @@ export const TRAIT_LIBRARY = [
   { id:'focus', name:'Фокальное', color:'gold', category:'Магия' },
   { id:'illusion', name:'Иллюзия', color:'purple', category:'Магия' },
   { id:'summon', name:'Призыв', color:'deepBlue', category:'Магия' },
+  { id:'divination', name:'Прорицание', color:'purple', category:'Магия' },
+  { id:'evocation', name:'Эвокация', color:'red', category:'Магия' },
+  { id:'shadow', name:'Тень', color:'void', category:'Магия' },
 
   // Разное (доп.)
   { id:'subtle', name:'Незаметное', color:'silver', category:'Разное' },
@@ -108,6 +115,8 @@ export const TRAIT_LIBRARY = [
   { id:'light', name:'Свет', color:'gold', category:'Энергия' },
   { id:'mental', name:'Ментальный', color:'purple', category:'Энергия' },
   { id:'void', name:'Пустота', color:'void', category:'Энергия' },
+  { id:'spirit', name:'Дух', color:'silver', category:'Энергия' },
+  { id:'sonic', name:'Звук', color:'silver', category:'Энергия' },
 
   // Эффект (доп.)
   { id:'emotion', name:'Эмоции', color:'deepPink', category:'Эффект' },

@@ -1,7 +1,7 @@
 // Библиотека предметов. category: weapon, armor, shield, gear, consumable, bag, other.
 // Дескрипторы: { type:'library', id } из traits.js или { type:'custom', name }.
 // Оружие: type melee | ranged. Дальность и боеприпасы только у ranged.
-// Щит: acBonus, hardness, hpMax. Текущие ПЗ щита живут на экземпляре, только пока он экипирован.
+// Щит: acBonus, hardness, hpMax. Текущие ПЗ щита существуют на экземпляре, только пока он экипирован.
 
 export const ITEM_CATEGORY_LABELS = {
   weapon: 'Оружие',
@@ -20,6 +20,9 @@ export const ON_PERSON_LOCATIONS = ['worn', 'belt', 'equipped-armor', 'equipped-
 const WEAPON_PROF_RANKS = ['untrained', 'trained', 'expert', 'master', 'legendary'];
 
 export const ITEM_LIBRARY = [
+
+  // Сумки (bag)
+
   {
     id: 'backpack',
     name: 'Рюкзак',
@@ -95,6 +98,8 @@ export const ITEM_LIBRARY = [
     },
   },
 
+  // Оружие ближнего боя (weapon, melee)
+
   {
     id: 'longsword',
     name: 'Длинный меч',
@@ -112,6 +117,8 @@ export const ITEM_LIBRARY = [
       hands: '1',
     },
   },
+
+  // Оружие дальнего боя (weapon, ranged)
 
   {
     id: 'longbow',
@@ -134,6 +141,8 @@ export const ITEM_LIBRARY = [
       ammo: 'Стрелы',
     },
   },
+
+  // Броня (armor)
 
   {
     id: 'fullPlate',
@@ -173,6 +182,8 @@ export const ITEM_LIBRARY = [
     },
   },
 
+  // Щиты (shield)
+
   {
     id: 'steelShield',
     name: 'Стальной щит',
@@ -186,6 +197,8 @@ export const ITEM_LIBRARY = [
       hpMax: 20,
     },
   },
+
+  // Используемые предметы (сonsumabale)
 
   {
     id: 'healingPotionLvl1',
@@ -225,6 +238,8 @@ export const ITEM_LIBRARY = [
     },
   },
 
+  // Экипировка (gear)
+
   {
     id: 'masqueradeScarf',
     name: 'Платок маскировки',
@@ -236,6 +251,8 @@ export const ITEM_LIBRARY = [
     ],
     desc: 'Этот изящно вышитый платок подходит к любой одежде и может дополнить маскировку или костюм при помощи иллюзий.\n\nАктивация — Маскарад: 1 минута (манипуляция).\nЧастота: 1 в день. Эффект: вы укрываете нижнюю часть лица платком и он творит на вас иллюзорный облик 1 круга, действие которого немедленно прекращается, если платок снять. Вы можете изменить облик платка или же вовсе сделать его невидимым в качестве части эффекта иллюзорного облика, но его всё ещё можно почувствовать на ощупь.',
   },
+
+  // Разное (other)
 
   {
     id: 'academyToken',
