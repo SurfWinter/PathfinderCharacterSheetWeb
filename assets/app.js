@@ -4325,7 +4325,7 @@ function renderSettingsTab(){
         <div class="more-item" style="border:none;padding-top:0;">
           <div><div class="t">Автосохранение</div><div class="d">Данные хранятся локально в кэше браузера. Последнее сохранение: ${savedDate}</div></div>
         </div>
-        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.9</div>
+        <div class="empty-hint" style="text-align:left;padding:4px 4px 0;">Версия 1.3.11</div>
       </div>
     </div>
   `;
