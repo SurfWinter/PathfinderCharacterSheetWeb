@@ -681,14 +681,13 @@ export const RUNE_LIBRARY = [
   },
 
   {
-    id: 'id',
-    name: 'Name',
+    id: 'sizeChanging',
+    name: 'Изменения размера',
     slot: 'armor',
     traits: [
       { type: 'library', id: 'magic' },
-      { type: 'library', id: 'illusion' },
     ],
-    desc: 'description',
+    desc: 'Эта броня может быстро изменить свой размер и размер носителя. \n**Активация:** Изменение размера 1 (концентрация). \n**Частота:** 1 в день. \n**Эффект:** броня сотворяет на вас заклинание увеличение или уменьшение на ваш выбор.',
   },
 
   {
