@@ -1514,7 +1514,7 @@ function itemDescriptionHtml(item){
   (item.runes || []).forEach(rune=>{
     const name = escapeHtml(rune.name || 'Руна');
     const desc = rune.desc ? `<div>${formatRichText(rune.desc)}</div>` : '';
-    blocks.push(`<div class="rune-desc-block"><div class="rune-desc-name">${name}</div>${desc}</div>`);
+    blocks.push(`<div class="rune-desc-block"><div class="rune-desc-name">${name}</div>${tagsMetaHtml(rune.traits)}${desc}</div>`);
   });
   return blocks.length ? blocks.join('') : 'Нет описания';
 }
@@ -1687,6 +1687,7 @@ function shieldHpButtonsHtml(item){
       </div>
     </div>`;
 }
+const openEquipSlots = new Set(); // id надетых предметов с раскрытым описанием
 function equipSlotHtml(kind){
   const loc = kind === 'armor' ? 'equipped-armor' : 'equipped-shield';
   const item = equippedItem(loc);
@@ -1708,12 +1709,18 @@ function equipSlotHtml(kind){
   const extra = kind === 'armor'
     ? itemStatsHtml(item)
     : `${itemStatsHtml(item)}${shieldHpButtonsHtml(item)}`;
+  const open = openEquipSlots.has(item.id);
   return `
-    <div class="equip-slot">
-      <div class="equip-slot-k">${title}</div>
-      <div class="n">${escapeHtml(item.name)}</div>
+    <div class="equip-slot ${open ? 'open' : ''}">
+      <div class="equip-slot-head" data-slot-toggle="${item.id}">
+        <div class="equip-slot-k">${title}</div>
+        <svg class="chev ${open ? 'open' : ''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="n" data-slot-toggle="${item.id}">${escapeHtml(item.name)}</div>
       ${extra}
       ${tagsMetaHtml(item.traits)}
+      ${runesHtml(item)}
+      <div class="equip-slot-body ${open ? 'open' : ''}">${itemDescriptionHtml(item)}</div>
       ${isPlay() ? '' : `
       <div class="equip-slot-actions">
         ${formulaCopyBtnHtml(item.id)}
@@ -2309,6 +2316,13 @@ function wireEquipmentTab(){
       }
       const desc = card.querySelector('.bag-desc');
       if(desc) desc.classList.toggle('open');
+    });
+  });
+  root.querySelectorAll('[data-slot-toggle]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = el.dataset.slotToggle;
+      if(openEquipSlots.has(id)) openEquipSlots.delete(id); else openEquipSlots.add(id);
+      renderApp();
     });
   });
   root.querySelectorAll('[data-copy-to-formula]').forEach(btn=>{
