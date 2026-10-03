@@ -1633,8 +1633,12 @@ function itemRowHtml(item){
       <div class="list-item-body">${itemDescriptionHtml(item)}</div>
     </div>`;
 }
+// Раскрытые сумки: живут только в памяти (до перезагрузки страницы), чтобы ререндер их не сворачивал.
+const openBagsPlay = new Set();  // режим «Игра»: раскрыто содержимое
+const openBagsSetup = new Set(); // режим «Настройка»: раскрыто описание
 function bagCardHtml(bag){
   const play = isPlay();
+  const bagOpen = (play ? openBagsPlay : openBagsSetup).has(bag.id);
   const used = bag.bag.compartments.reduce((sum, compartment)=>sum + compartmentContentsBulk(CH.equipment.items, bag, compartment), 0);
   const cap = bag.bag.compartments.reduce((sum, compartment)=>sum + (Number(compartment.capacity)||0), 0);
   const effective = bagEffectiveBulk(CH.equipment.items, bag);
@@ -1660,7 +1664,7 @@ function bagCardHtml(bag){
       </div>`;
   }).join('');
   return `
-    <div class="bag-card" data-bag-id="${bag.id}">
+    <div class="bag-card${play && bagOpen ? ' open' : ''}" data-bag-id="${bag.id}">
       <div class="bag-card-head" data-bag-toggle>
         <div>
           <div class="n">${escapeHtml(bag.name)}</div>
@@ -1680,7 +1684,7 @@ function bagCardHtml(bag){
         <div class="bag-desc open">${bag.desc ? formatRichText(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
         ${compartments}
       </div>` : `
-      <div class="bag-desc">${bag.desc ? formatRichText(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
+      <div class="bag-desc${bagOpen ? ' open' : ''}">${bag.desc ? formatRichText(bag.desc) : 'Нет описания'}${bag.note ? `<div class="item-stat-line">${escapeHtml(bag.note)}</div>` : ''}</div>
       ${compartments}`}
     </div>`;
 }
@@ -2312,6 +2316,8 @@ function deleteEquipmentItem(id){
     });
   }
   CH.equipment.items = CH.equipment.items.filter(entry=>entry.id !== id);
+  openBagsPlay.delete(id);
+  openBagsSetup.delete(id);
 }
 
 function wireEquipmentTab(){
@@ -2321,13 +2327,10 @@ function wireEquipmentTab(){
   root.querySelectorAll('[data-bag-toggle]').forEach(head=>{
     head.addEventListener('click', e=>{
       if(e.target.closest('button, select, input')) return;
-      const card = head.parentElement;
-      if(isPlay()){
-        card.classList.toggle('open');
-        return;
-      }
-      const desc = card.querySelector('.bag-desc');
-      if(desc) desc.classList.toggle('open');
+      const id = head.parentElement.dataset.bagId;
+      const set = isPlay() ? openBagsPlay : openBagsSetup;
+      if(set.has(id)) set.delete(id); else set.add(id);
+      renderApp();
     });
   });
   root.querySelectorAll('[data-coin-toggle]').forEach(el=>{
