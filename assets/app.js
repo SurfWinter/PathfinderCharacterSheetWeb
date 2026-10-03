@@ -1446,7 +1446,27 @@ function setCurrencyQty(location, key, qty){
     isCurrency: true, currencyKey: key, custom: false, traits: [],
   });
 }
-function currencyGridHtml(location){
+function currencyBadgesHtml(location){
+  return `<span class="coin-badges">${CURRENCY_DEFS.map(def=>{
+    const qty = getCurrencyQty(location, def.key);
+    return `<span class="coin-badge ${def.key}${qty ? '' : ' zero'}" title="${escapeAttr(def.name)}" aria-label="${escapeAttr(def.name + ': ' + qty)}">${qty}</span>`;
+  }).join('')}</span>`;
+}
+function currencyBlockHtml(location){
+  const open = !!(CH.coinGridsOpen && CH.coinGridsOpen[location]);
+  return `
+    <div class="coin-block">
+      <div class="coin-block-head" data-coin-toggle="${escapeAttr(location)}">
+        <span class="coin-block-label">Монеты</span>
+        <span class="coin-block-right">
+          ${open ? '' : currencyBadgesHtml(location)}
+          <svg class="chev ${open ? 'open' : ''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+      </div>
+      ${open ? currencyInputsHtml(location) : ''}
+    </div>`;
+}
+function currencyInputsHtml(location){
   return `<div class="currency-grid">${CURRENCY_DEFS.map(def=>`
     <label class="currency-cell">${escapeHtml(def.name)}
       <input type="number" min="0" step="1" data-currency="${escapeAttr(location + '::' + def.key)}" value="${getCurrencyQty(location, def.key)}">
@@ -1634,7 +1654,7 @@ function bagCardHtml(bag){
       <div class="compartment-block">
         <div class="compartment-title">${escapeHtml(title)}</div>
         ${play ? '' : fillBarHtml(compartmentContentsBulk(CH.equipment.items, bag, compartment), compartment.capacity)}
-        ${currencyGridHtml(location)}
+        ${currencyBlockHtml(location)}
         ${contents.map(itemRowHtml).join('') || '<div class="empty-hint" style="padding:8px 0;">Пусто</div>'}
         ${play ? '' : `<button class="btn btn-sm btn-block location-add" data-add-item-loc="${escapeAttr(location)}">+ Предмет в этот отсек</button>`}
       </div>`;
@@ -1665,14 +1685,6 @@ function bagCardHtml(bag){
     </div>`;
 }
 
-function currencySummary(location){
-  const short = {cp:'мм', sp:'см', gp:'зм', pp:'пм'};
-  const parts = CURRENCY_DEFS.map(def=>{
-    const qty = getCurrencyQty(location, def.key);
-    return qty ? `${qty} ${short[def.key]}` : null;
-  }).filter(Boolean);
-  return parts.join(' · ') || 'Нет монет';
-}
 function shieldHpButtonsHtml(item){
   const max = Number(item.shield && item.shield.hpMax) || 0;
   const current = item.shieldHpCurrent == null ? max : clamp(Number(item.shieldHpCurrent)||0, 0, max);
@@ -1754,7 +1766,7 @@ function renderEquipmentTab(){
       </div>
       <div class="card-body" style="display:block;">
         <div class="empty-hint" style="padding:0 0 8px;text-align:left;">Не даёт веса персонажу</div>
-        ${currencyGridHtml(storage.id)}
+        ${currencyBlockHtml(storage.id)}
         ${bags}
         ${list || (!bags ? '<div class="empty-hint">Пусто</div>' : '')}
         <button class="btn btn-sm btn-block location-add" data-add-item-loc="${escapeAttr(storage.id)}">+ Предмет сюда</button>
@@ -1777,12 +1789,12 @@ function renderEquipmentTab(){
         <div class="card-header" data-collapse-toggle="coinsCollapsed">
           <h3>Монеты</h3>
           <div class="coin-head-right">
-            <span class="coin-summary">${currencySummary('worn')}</span>
+            ${currencyBadgesHtml('worn')}
             <svg class="chev ${!CH.coinsCollapsed?'open':''}" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M6 9l6 6 6-6"/></svg>
           </div>
         </div>
         <div class="card-body ${CH.coinsCollapsed?'collapsed':''}">
-          ${currencyGridHtml('worn')}
+          ${currencyInputsHtml('worn')}
         </div>
       </div>
 
@@ -2316,6 +2328,15 @@ function wireEquipmentTab(){
       }
       const desc = card.querySelector('.bag-desc');
       if(desc) desc.classList.toggle('open');
+    });
+  });
+  root.querySelectorAll('[data-coin-toggle]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      if(!CH.coinGridsOpen || typeof CH.coinGridsOpen !== 'object') CH.coinGridsOpen = {};
+      const key = el.dataset.coinToggle;
+      if(CH.coinGridsOpen[key]) delete CH.coinGridsOpen[key]; else CH.coinGridsOpen[key] = true;
+      save();
+      renderApp();
     });
   });
   root.querySelectorAll('[data-slot-toggle]').forEach(el=>{

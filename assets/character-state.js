@@ -109,6 +109,7 @@ function defaultCharacter(){
     traits: [], // [{type:'library',id}] или [{type:'custom',name}]
     languages: [], // "Общий", "Эльфийский" и т.п.
     coinsCollapsed:true,
+    coinGridsOpen:{}, // location -> true, если поля ввода монет раскрыты (по умолчанию свёрнуты)
     aboutCollapsed:true,
     actionsAllCollapsed:false,
     spellSlotsCollapsed:false,
@@ -635,6 +636,7 @@ function normalizeCharacter(parsed){
     feats: migrateFeats(parsed.feats),
     skills: migrateSkills(parsed.skills) || defaultCharacter().skills,
     coinsCollapsed: parsed.coinsCollapsed != null ? !!parsed.coinsCollapsed : true,
+    coinGridsOpen: parsed.coinGridsOpen && typeof parsed.coinGridsOpen === 'object' && !Array.isArray(parsed.coinGridsOpen) ? parsed.coinGridsOpen : {},
     hpCollapsed: parsed.hpCollapsed != null ? !!parsed.hpCollapsed : parsed.mode === 'play',
     defensesCollapsed: parsed.defensesCollapsed != null ? !!parsed.defensesCollapsed : parsed.mode === 'play',
     perceptionCollapsed: parsed.perceptionCollapsed != null ? !!parsed.perceptionCollapsed : parsed.mode === 'play',
